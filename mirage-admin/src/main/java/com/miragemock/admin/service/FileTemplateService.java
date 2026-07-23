@@ -94,6 +94,7 @@ public class FileTemplateService {
     public GeneratedFile generate(FileGenRequest req) {
         normalizeReq(req);
         EvalContext ctx = newContext(req.getProjectId());
+        ctx.getVariables().put("count", req.getRowCount());
         String sep = "LF".equalsIgnoreCase(req.getLineSeparator()) ? "\n" : "\r\n";
         StringBuilder sb = new StringBuilder();
         if (isNonEmpty(req.getHeaderLine())) {
@@ -110,6 +111,7 @@ public class FileTemplateService {
     public List<String> preview(FileGenRequest req) {
         normalizeReq(req);
         EvalContext ctx = newContext(req.getProjectId());
+        ctx.getVariables().put("count", req.getRowCount());
         List<String> lines = new ArrayList<>();
         if (isNonEmpty(req.getHeaderLine())) {
             lines.add(eval(req.getHeaderLine(), ctx));

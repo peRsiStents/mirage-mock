@@ -66,7 +66,8 @@ public final class FunctionCatalog {
 
                 // 上下文变量
                 new FunctionDescriptor("path.*", "上下文变量", "HTTP 路径变量", "${path.userId}", "any"),
-                new FunctionDescriptor("field.*", "上下文变量", "TCP 报文字段 / 已渲染字段引用", "${field.serialNo}", "any")
+                new FunctionDescriptor("field.*", "上下文变量", "TCP 报文字段 / HTTP请求体字段 / 已渲染字段引用", "${field.serialNo}", "any"),
+                new FunctionDescriptor("count", "上下文变量", "文件生成：数据行数（=生成行数，可用于首行汇总笔数）", "${count}", "long")
         );
     }
 }
