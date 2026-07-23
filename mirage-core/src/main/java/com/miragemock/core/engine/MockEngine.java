@@ -174,9 +174,28 @@ public class MockEngine {
                 baseVars.put("path." + e.getKey(), e.getValue());
             }
         }
+        // 请求体展平为 field.*，供响应模板回显，如 ${field.body.aac001}
+        flattenRequestFields(req, baseVars);
         EvalContext ctx = new EvalContext(baseVars, secretResolver, seqProvider, snap.getProjectId());
         RenderedResponse rr = renderer.render(rule.getTemplateNode(), baseVars, ctx);
         return MockResponse.write(rr.getStatus(), rr.getHeaders(), rr.getBody());
+    }
+
+    /** 将请求体 JSON 对象展平为 field.* 变量（与 TCP 一致），便于响应模板引用请求字段。 */
+    @SuppressWarnings("unchecked")
+    private void flattenRequestFields(RequestSnapshot req, Map<String, Object> out) {
+        String bodyRaw = req.getBodyRaw();
+        if (bodyRaw == null || bodyRaw.isEmpty()) {
+            return;
+        }
+        try {
+            Object parsed = JsonUtils.parseMap(bodyRaw);
+            if (parsed instanceof Map) {
+                flattenFields("field", (Map<String, Object>) parsed, out);
+            }
+        } catch (Exception ignore) {
+            // 非 JSON 对象体（数组/纯文本等）不展平
+        }
     }
 
     private MockResponse errorStatusResponse(MockRule rule) {

@@ -178,9 +178,15 @@ function buildPayload() {
   let template
   try { template = JSON.parse(templateText.value) } catch (e) { throw new Error('响应模板不是合法 JSON') }
   const matchCondition = conditions.value.map((c) => {
-    let val = c.valueText
-    if (c.op === 'in') val = c.valueText.split(',').map((s) => s.trim()).filter((s) => s !== '')
-    return { source: c.source, key: c.key, op: c.op, value: val }
+    // 防呆：trim key 与 value 首尾空格（前导空格会让 JSONPath/键名失配导致不命中）
+    const key = (c.key || '').trim()
+    let val = c.valueText == null ? '' : String(c.valueText)
+    if (c.op === 'in') {
+      val = val.split(',').map((s) => s.trim()).filter((s) => s !== '')
+    } else {
+      val = val.trim()
+    }
+    return { source: c.source, key, op: c.op, value: val }
   })
   let faultConfig = null
   if (form.value.faultType === 'ERROR_STATUS') {
