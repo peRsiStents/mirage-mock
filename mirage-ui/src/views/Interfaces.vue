@@ -89,7 +89,7 @@
               <el-option v-for="m in ['GET','POST','PUT','DELETE','PATCH','ANY']" :key="m" :label="m" :value="m" />
             </el-select>
           </el-form-item>
-          <el-form-item label="路径"><el-input v-model="ifaceForm.httpPath" placeholder="/api/user/{userId}" /></el-form-item>
+          <el-form-item label="路径"><el-input v-model="ifaceForm.httpPath" placeholder="/api/user/{userId}" @input="pathManuallyEdited = true" /></el-form-item>
           <el-form-item label="访问地址">
             <div class="preview-url">
               <span class="mono">{{ previewUrl || '（填写路径后生成）' }}</span>
@@ -149,10 +149,21 @@ function mockUrl(row) {
   return `${location.protocol}//${location.hostname}:${mockPort.value}${row.httpPath}`
 }
 
-function genDefaultPath() {
-  // 新建接口时自动生成一个唯一默认路径，用户可自由修改
-  return '/api/itf_' + Math.random().toString(16).slice(2, 8)
+// 路径是否被用户手动改过（未改时随接口名自动生成）
+const pathManuallyEdited = ref(false)
+
+function genInterfacePath(name) {
+  const code = (proj.code || 'app').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'app'
+  const seg = (name || '').trim().replace(/\s+/g, '-').replace(/\/+/g, '').trim()
+  return '/api/' + code + (seg ? '/' + seg : '')
 }
+
+// 新建时接口名变化 → 自动生成路径（用户手改过则不覆盖）
+watch(() => ifaceForm.name, () => {
+  if (ifaceForm.protocol === 'HTTP' && !pathManuallyEdited.value) {
+    ifaceForm.httpPath = genInterfacePath(ifaceForm.name)
+  }
+})
 
 async function loadSystemInfo() {
   try {
@@ -196,12 +207,14 @@ function onSelectInterface(row) {
 }
 
 function openCreateInterface() {
-  Object.assign(ifaceForm, { id: null, name: '', protocol: 'HTTP', httpMethod: 'GET', httpPath: genDefaultPath(), tcpListenerId: null, tcpRouteExpr: '', status: 1, remark: '' })
+  Object.assign(ifaceForm, { id: null, name: '', protocol: 'HTTP', httpMethod: 'GET', httpPath: genInterfacePath(''), tcpListenerId: null, tcpRouteExpr: '', status: 1, remark: '' })
+  pathManuallyEdited.value = false
   loadListeners()
   ifaceVisible.value = true
 }
 
 function openEditInterface(row) {
+  pathManuallyEdited.value = true
   Object.assign(ifaceForm, row)
   loadListeners()
   ifaceVisible.value = true
