@@ -13,6 +13,7 @@
         <el-menu-item index="/logs"><el-icon><Document /></el-icon><span>请求日志</span></el-menu-item>
         <el-menu-item index="/functions"><el-icon><Grid /></el-icon><span>函数市场</span></el-menu-item>
         <el-menu-item index="/file-gen"><el-icon><DocumentCopy /></el-icon><span>文件生成</span></el-menu-item>
+        <el-menu-item index="/testcases"><el-icon><Promotion /></el-icon><span>测试用例</span></el-menu-item>
         <el-menu-item v-if="auth.isAdmin" index="/users"><el-icon><User /></el-icon><span>用户管理</span></el-menu-item>
       </el-menu>
     </el-aside>

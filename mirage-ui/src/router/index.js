@@ -15,6 +15,7 @@ const routes = [
       { path: 'logs', name: 'logs', component: () => import('../views/Logs.vue') },
       { path: 'functions', name: 'functions', component: () => import('../views/Functions.vue') },
       { path: 'file-gen', name: 'file-gen', component: () => import('../views/FileGen.vue') },
+      { path: 'testcases', name: 'testcases', component: () => import('../views/TestCases.vue') },
       { path: 'users', name: 'users', component: () => import('../views/Users.vue'), meta: { admin: true } }
     ]
   }

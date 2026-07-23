@@ -66,5 +66,13 @@ export const api = {
     remove: (id) => http.delete(`/file-templates/${id}`),
     preview: (payload) => http.post('/file-templates/preview', payload),
     generate: (payload) => http.post('/file-templates/generate', payload, { responseType: 'blob' })
+  },
+  testCases: {
+    list: (pid) => http.get(`/projects/${pid}/testcases`),
+    create: (pid, t) => http.post(`/projects/${pid}/testcases`, t),
+    update: (id, t) => http.put(`/testcases/${id}`, t),
+    remove: (id) => http.delete(`/testcases/${id}`),
+    run: (id) => http.post(`/testcases/${id}/run`),
+    runs: (id) => http.get(`/testcases/${id}/runs`)
   }
 }
