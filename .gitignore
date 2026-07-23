@@ -1,0 +1,30 @@
+# ---- Maven ----
+target/
+*.jar
+*.war
+
+# ---- Frontend (mirage-ui) ----
+mirage-ui/node_modules/
+mirage-ui/dist/
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# ---- OS ----
+Thumbs.db
+.DS_Store
+
+# ---- Logs / 临时 ----
+*.log
+/logs/
+/tmp/
+
+# ---- Claude 本地会话配置 ----
+.claude/
+
+# ---- 本机构建环境（路径因机器而异，按需自行修改）----
+# 注：.tools/env.sh 含本机 JDK/Maven 绝对路径，已纳入版本控制以便开箱即用；
+# 如需按机器隔离，可改为忽略并在 README 提供 env.sh.example。

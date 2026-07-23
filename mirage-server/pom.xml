@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.miragemock</groupId>
+        <artifactId>mirage-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>mirage-server</artifactId>
+    <name>mirage-server</name>
+    <description>装配启动模块</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.miragemock</groupId>
+            <artifactId>mirage-admin</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.miragemock</groupId>
+            <artifactId>mirage-http</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.miragemock</groupId>
+            <artifactId>mirage-tcp</artifactId>
+        </dependency>
+
+        <!-- 数据库迁移 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+            <version>8.5.13</version>
+        </dependency>
+
+        <!-- 运行时数据库驱动（按 profile 切换） -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>8.0.33</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>mirage-mock</finalName>
+
+        <!--
+            管理端前端（mirage-ui，Vue3 + Vite）产物打包：
+            将 mirage-ui/dist 的内容拷入 classpath:/static，Spring Boot 2.7 自动在 / 提供 index.html
+            并服务 /assets/**；前端采用 hash 路由（createWebHashHistory），无需 SPA 兜底。
+            重新构建前端：cd mirage-ui && npm install && npm run build（产物刷新后再次 mvn package 即可）。
+        -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../mirage-ui/dist</directory>
+                <targetPath>static</targetPath>
+                <filtering>false</filtering>
+            </resource>
+        </resources>
+
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.miragemock.MirageMockApplication</mainClass>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
