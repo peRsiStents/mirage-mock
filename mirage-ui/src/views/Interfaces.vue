@@ -125,6 +125,7 @@ import { Plus, CopyDocument } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
 import { copyText as copy } from '../utils/clipboard'
+import { pinyin } from 'pinyin-pro'
 import RuleEditor from '../components/RuleEditor.vue'
 
 const proj = useProjectStore()
@@ -154,8 +155,15 @@ const pathManuallyEdited = ref(false)
 
 function genInterfacePath(name) {
   const code = (proj.code || 'app').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'app'
-  const seg = (name || '').trim().replace(/\s+/g, '-').replace(/\/+/g, '').trim()
+  const seg = nameToSlug(name)
   return '/api/' + code + (seg ? '/' + seg : '')
+}
+
+// 中文名转拼音 slug（英文/数字保留，其余丢弃），如「获取用户」-> huo-qu-yong-hu
+function nameToSlug(name) {
+  if (!name) return ''
+  const py = pinyin(name, { toneType: 'none', nonZh: 'consecutive' })
+  return py.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 // 新建时接口名变化 → 自动生成路径（用户手改过则不覆盖）
