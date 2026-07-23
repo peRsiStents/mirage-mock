@@ -25,6 +25,9 @@ Thumbs.db
 # ---- Claude 本地会话配置 ----
 .claude/
 
+# ---- 部署：真实环境变量（含密码，仅提交 .env.example）----
+deploy/mirage-mock.env
+
 # ---- 本机构建环境（路径因机器而异，按需自行修改）----
 # 注：.tools/env.sh 含本机 JDK/Maven 绝对路径，已纳入版本控制以便开箱即用；
 # 如需按机器隔离，可改为忽略并在 README 提供 env.sh.example。

@@ -1,0 +1,23 @@
+[Unit]
+Description=Mirage Mock (接口 Mock 数据生成系统)
+Documentation=https://github.com/peRsiStents/mirage-mock
+After=network-online.target mysqld.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 运行账号（按需改为 root 或自建用户）；端口均 >1024，非特权即可
+User=mirage
+Group=mirage
+WorkingDirectory=/opt/mirage-mock
+EnvironmentFile=/opt/mirage-mock/mirage-mock.env
+# 堆内存按机器调整；-Xmx512m 一般够用
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/mirage-mock/mirage-mock.jar
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/mirage-mock/app.log
+StandardError=append:/var/log/mirage-mock/app.err.log
+
+[Install]
+WantedBy=multi-user.target
