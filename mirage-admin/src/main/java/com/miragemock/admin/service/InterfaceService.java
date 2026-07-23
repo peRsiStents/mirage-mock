@@ -54,7 +54,7 @@ public class InterfaceService {
         if (iface.getProtocol() == null) {
             iface.setProtocol("HTTP");
         }
-        ensureUniquePath(iface.getProjectId(), iface.getHttpMethod(), iface.getHttpPath(), null);
+        ensureUniquePath(iface.getHttpMethod(), iface.getHttpPath(), null);
         interfaceMapper.insert(iface);
         ruleCache.invalidate(iface.getProjectId());
         return iface;
@@ -81,19 +81,18 @@ public class InterfaceService {
         if (patch.getRemark() != null) {
             exists.setRemark(patch.getRemark());
         }
-        ensureUniquePath(exists.getProjectId(), exists.getHttpMethod(), exists.getHttpPath(), id);
+        ensureUniquePath(exists.getHttpMethod(), exists.getHttpPath(), id);
         interfaceMapper.updateById(exists);
         ruleCache.invalidate(exists.getProjectId());
         return exists;
     }
 
-    /** 同项目内 (httpMethod, httpPath) 必须唯一，否则路由歧义。仅约束 HTTP 接口。 */
-    private void ensureUniquePath(Long projectId, String method, String path, Long excludeId) {
+    /** (httpMethod, httpPath) 全局唯一（跨所有项目），否则路由歧义/需 header。仅约束 HTTP 接口。 */
+    private void ensureUniquePath(String method, String path, Long excludeId) {
         if (method == null || method.isEmpty() || path == null || path.isEmpty()) {
             return;
         }
         LambdaQueryWrapper<ApiInterface> q = new LambdaQueryWrapper<ApiInterface>()
-                .eq(ApiInterface::getProjectId, projectId)
                 .eq(ApiInterface::getHttpMethod, method)
                 .eq(ApiInterface::getHttpPath, path);
         if (excludeId != null) {
@@ -101,7 +100,7 @@ public class InterfaceService {
         }
         Long c = interfaceMapper.selectCount(q);
         if (c != null && c > 0) {
-            throw new BizException(ResultCode.CONFLICT, "接口路径已存在：" + method + " " + path);
+            throw new BizException(ResultCode.CONFLICT, "接口路径已存在（全局唯一）：" + method + " " + path);
         }
     }
 
