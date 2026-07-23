@@ -53,14 +53,26 @@ public class MockEngine {
     }
 
     public HttpMockResult handleHttp(RequestSnapshot req) {
+        String code = req.getHeaders() == null ? null : req.getHeaders().get(Constants.HEADER_PROJECT_CODE.toLowerCase());
+        boolean hasProjectHeader = code != null && !code.isEmpty();
+
         ProjectSnapshot snap = resolveProject(req);
-        if (snap == null) {
-            return HttpMockResult.notMatched(null, null, noRuleResponse(req));
+        InterfaceMatch im;
+        if (snap != null) {
+            // 有项目标识（header 指定 或 全局仅一个项目）：在该项目内路由
+            im = matchInterface(snap, req);
+        } else if (!hasProjectHeader) {
+            // 无标识且多项目：跨项目按 method+path 唯一定位（路径全局唯一即可命中）
+            im = resolveByUniquePath(req);
+        } else {
+            // header 指定的项目编码不存在
+            im = null;
         }
-        InterfaceMatch im = matchInterface(snap, req);
         if (im == null) {
-            return HttpMockResult.notMatched(snap.getProjectId(), null, noRuleResponse(req));
+            Long pid = snap == null ? null : snap.getProjectId();
+            return HttpMockResult.notMatched(pid, null, noRuleResponse(req));
         }
+        snap = im.snapshot;
 
         CompiledRule hit = null;
         for (CompiledRule rule : im.iface.getRules()) {
@@ -95,19 +107,49 @@ public class MockEngine {
     private InterfaceMatch matchInterface(ProjectSnapshot snap, RequestSnapshot req) {
         String method = req.getMethod() == null ? "" : req.getMethod().toUpperCase();
         for (CompiledInterface iface : snap.httpInterfaces()) {
-            String m = iface.getEntity().getHttpMethod();
-            boolean methodOk = m == null || m.isEmpty() || "ANY".equalsIgnoreCase(m) || m.equalsIgnoreCase(method);
-            if (!methodOk) {
-                continue;
+            Map<String, String> vars = matchInterfacePattern(iface, method, req.getPath());
+            if (vars != null) {
+                return new InterfaceMatch(snap, iface, vars);
             }
-            String pattern = iface.getEntity().getHttpPath();
-            if (pattern == null || !pathMatcher.match(pattern, req.getPath())) {
-                continue;
-            }
-            Map<String, String> vars = pathMatcher.extractUriTemplateVariables(pattern, req.getPath());
-            return new InterfaceMatch(iface, vars);
         }
         return null;
+    }
+
+    /**
+     * 无项目标识且存在多项目时：在所有项目里按 method+path 查找接口。
+     * 全局唯一匹配则返回；零匹配、或多项目均存在该路径（歧义）时返回 null（此时需显式带项目 header）。
+     */
+    private InterfaceMatch resolveByUniquePath(RequestSnapshot req) {
+        String method = req.getMethod() == null ? "" : req.getMethod().toUpperCase();
+        InterfaceMatch found = null;
+        for (ProjectSnapshot snap : cache.all()) {
+            for (CompiledInterface iface : snap.httpInterfaces()) {
+                Map<String, String> vars = matchInterfacePattern(iface, method, req.getPath());
+                if (vars == null) {
+                    continue;
+                }
+                if (found != null) {
+                    // 多个项目都匹配到该 method+path → 歧义，放弃（要求显式 header）
+                    return null;
+                }
+                found = new InterfaceMatch(snap, iface, vars);
+            }
+        }
+        return found;
+    }
+
+    /** method+path 是否匹配该接口；匹配则返回路径变量，否则 null（method 空或 ANY 视为通配） */
+    private Map<String, String> matchInterfacePattern(CompiledInterface iface, String method, String path) {
+        String m = iface.getEntity().getHttpMethod();
+        boolean methodOk = m == null || m.isEmpty() || "ANY".equalsIgnoreCase(m) || m.equalsIgnoreCase(method);
+        if (!methodOk) {
+            return null;
+        }
+        String pattern = iface.getEntity().getHttpPath();
+        if (pattern == null || !pathMatcher.match(pattern, path)) {
+            return null;
+        }
+        return pathMatcher.extractUriTemplateVariables(pattern, path);
     }
 
     // ============ 延迟 / 故障注入 / 渲染 ============
@@ -277,10 +319,12 @@ public class MockEngine {
     // ============ 内部 ============
 
     private static final class InterfaceMatch {
+        final ProjectSnapshot snapshot;
         final CompiledInterface iface;
         final Map<String, String> pathVars;
 
-        InterfaceMatch(CompiledInterface iface, Map<String, String> pathVars) {
+        InterfaceMatch(ProjectSnapshot snapshot, CompiledInterface iface, Map<String, String> pathVars) {
+            this.snapshot = snapshot;
             this.iface = iface;
             this.pathVars = pathVars;
         }
