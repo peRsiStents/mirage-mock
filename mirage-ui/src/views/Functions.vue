@@ -31,8 +31,8 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { copyText as copy } from '../utils/clipboard'
 
 const list = ref([])
 const loading = ref(false)
@@ -52,10 +52,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function copy(text) {
-  navigator.clipboard.writeText(text || '').then(() => ElMessage.success('已复制：' + text))
 }
 
 onMounted(load)

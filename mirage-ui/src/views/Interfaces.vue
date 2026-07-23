@@ -124,6 +124,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, CopyDocument } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
+import { copyText as copy } from '../utils/clipboard'
 import RuleEditor from '../components/RuleEditor.vue'
 
 const proj = useProjectStore()
@@ -151,16 +152,6 @@ function mockUrl(row) {
 function genDefaultPath() {
   // 新建接口时自动生成一个唯一默认路径，用户可自由修改
   return '/api/itf_' + Math.random().toString(16).slice(2, 8)
-}
-
-async function copy(text) {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制：' + text)
-  } catch {
-    ElMessage.warning('复制失败，请手动选中文本复制')
-  }
 }
 
 async function loadSystemInfo() {
