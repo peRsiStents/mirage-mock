@@ -20,6 +20,8 @@ public final class FunctionCatalog {
                 new FunctionDescriptor("name.en", "人员与证件", "英文姓名", "${name.en}", "string"),
                 new FunctionDescriptor("phone.cn_mobile", "人员与证件", "中国大陆手机号", "${phone.cn_mobile}", "string"),
                 new FunctionDescriptor("idcard.cn", "人员与证件", "身份证号（含校验位）", "${idcard.cn}", "string"),
+                new FunctionDescriptor("idcard.birthdate", "人员与证件", "身份证对应出生日期（复用同行 idcard.cn 的证）", "${idcard.birthdate} / ${idcard.birthdate('yyyy/MM/dd')}", "string"),
+                new FunctionDescriptor("idcard.gender", "人员与证件", "身份证对应性别（男/女）", "${idcard.gender}", "string"),
                 new FunctionDescriptor("bankcard.cn", "人员与证件", "银行卡号（Luhn 校验）", "${bankcard.cn}", "string"),
                 new FunctionDescriptor("uscc.cn", "人员与证件", "统一社会信用代码", "${uscc.cn}", "string"),
                 new FunctionDescriptor("address.cn", "人员与证件", "中文地址", "${address.cn}", "string"),

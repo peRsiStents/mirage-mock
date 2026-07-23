@@ -12,9 +12,9 @@
           :key="f.name"
           class="fn-item mono"
           :title="f.description + '  示例：' + f.example"
-          @click="onPick(f)"
         >
-          {{ f.name }}
+          <span class="fn-name" @click="onPick(f)">{{ f.name }}</span>
+          <el-icon class="copy-ic" title="复制 ${...}" @click.stop="copyFn(f)"><CopyDocument /></el-icon>
         </div>
       </div>
       <el-empty v-if="!groups.length" description="无匹配函数" :image-size="40" />
@@ -43,7 +43,9 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { CopyDocument } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { copyText } from '../utils/clipboard'
 
 const props = defineProps({ projectId: { type: [Number, String], default: null } })
 const emit = defineEmits(['insert'])
@@ -83,6 +85,10 @@ function onPick(f) {
   } else {
     emit('insert', '${' + f.name + '}')
   }
+}
+
+function copyFn(f) {
+  copyText('${' + f.name + '}')
 }
 
 function pickCrypto(f) {
@@ -139,5 +145,22 @@ watch(() => props.projectId, loadKeys)
   font-size: 13px;
   padding: 3px 6px;
   border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.fn-item .fn-name {
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+.fn-item .copy-ic {
+  cursor: pointer;
+  color: #c0c4cc;
+  flex-shrink: 0;
+}
+.fn-item:hover .copy-ic {
+  color: #409eff;
 }
 </style>

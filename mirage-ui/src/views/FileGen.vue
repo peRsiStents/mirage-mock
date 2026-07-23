@@ -28,15 +28,21 @@
 
     <el-dialog v-model="formVisible" :title="form.id ? '编辑模板' : '新建模板'" width="780px">
       <el-form :model="form" label-width="90px">
+        <el-form-item label="名称"><el-input v-model="form.name" placeholder="如：批量开户文件" /></el-form-item>
         <el-row :gutter="12">
-          <el-col :span="8"><el-form-item label="名称"><el-input v-model="form.name" /></el-form-item></el-col>
-          <el-col :span="5"><el-form-item label="行数"><el-input-number v-model="form.rowCount" :min="1" :max="100000" /></el-form-item></el-col>
-          <el-col :span="4"><el-form-item label="编码">
-            <el-select v-model="form.encoding"><el-option label="GBK" value="GBK" /><el-option label="UTF-8" value="UTF-8" /></el-select>
-          </el-form-item></el-col>
-          <el-col :span="4"><el-form-item label="扩展名">
-            <el-select v-model="form.fileExt"><el-option label="txt" value="txt" /><el-option label="dat" value="dat" /></el-select>
-          </el-form-item></el-col>
+          <el-col :span="8">
+            <el-form-item label="行数" label-width="56px"><el-input-number v-model="form.rowCount" :min="1" :max="100000" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="编码" label-width="56px">
+              <el-select v-model="form.encoding" style="width:100%"><el-option label="GBK" value="GBK" /><el-option label="UTF-8" value="UTF-8" /></el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="扩展名" label-width="56px">
+              <el-select v-model="form.fileExt" style="width:100%"><el-option label="txt" value="txt" /><el-option label="dat" value="dat" /></el-select>
+            </el-form-item>
+          </el-col>
         </el-row>
         <el-form-item label="行分隔符">
           <el-radio-group v-model="form.lineSeparator">
@@ -50,14 +56,14 @@
         <el-row :gutter="12">
           <el-col :span="17">
             <el-form-item label="行模板">
-              <el-input v-model="form.rowTemplate" type="textarea" :rows="5" placeholder="如：${seq('kh',1)}|${name.cn}|${idcard.cn}|${decimal(100,999,2)}" />
+              <textarea ref="tplArea" v-model="form.rowTemplate" class="tpl-area" rows="5" spellcheck="false" placeholder="如：${seq('kh',1)}|${name.cn}|${idcard.cn}|${idcard.birthdate}|${idcard.gender}|${decimal(100,999,2)}"></textarea>
               <div v-if="hasSeq" class="warn">⚠ 该模板含 ${seq(...)}，每次生成/预览都会永久消费项目序列值。</div>
             </el-form-item>
           </el-col>
           <el-col :span="7">
             <div class="fn-panel">
-              <div class="fn-title">函数市场 · 点击追加到模板</div>
-              <FunctionMarketSidebar :project-id="proj.id" @insert="appendFn" />
+              <div class="fn-title">函数市场 · 点名称插入光标处 / 点图标复制</div>
+              <FunctionMarketSidebar :project-id="proj.id" @insert="insertAtCursor" />
             </div>
           </el-col>
         </el-row>
@@ -78,7 +84,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
@@ -92,6 +98,7 @@ const loading = ref(false)
 const formVisible = ref(false)
 const form = reactive({ id: null, name: '', headerLine: '', rowTemplate: '', rowCount: 100, encoding: 'GBK', lineSeparator: 'CRLF', fileExt: 'txt', remark: '' })
 const hasSeq = computed(() => /\$\{seq\(/.test(form.rowTemplate || ''))
+const tplArea = ref(null)
 
 const previewVisible = ref(false)
 const previewing = ref(false)
@@ -118,8 +125,14 @@ function openEdit(row) {
   formVisible.value = true
 }
 
-function appendFn(text) {
-  form.rowTemplate = (form.rowTemplate || '') + text
+function insertAtCursor(text) {
+  const cur = form.rowTemplate || ''
+  const el = tplArea.value
+  if (!el) { form.rowTemplate = cur + text; return }
+  const s = el.selectionStart || 0
+  const e = el.selectionEnd || 0
+  form.rowTemplate = cur.slice(0, s) + text + cur.slice(e)
+  nextTick(() => { el.focus(); el.selectionStart = el.selectionEnd = s + text.length })
 }
 
 function buildReq() {
@@ -212,6 +225,8 @@ onMounted(load)
 <style scoped>
 .card-header { display: flex; align-items: center; justify-content: space-between; }
 .mono { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 12px; }
+.tpl-area { width: 100%; font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 13px;
+  padding: 8px; border: 1px solid #dcdfe6; border-radius: 4px; resize: vertical; box-sizing: border-box; }
 .warn { color: #e6a23c; font-size: 12px; margin-top: 4px; }
 .fn-panel { border: 1px solid #ebeef5; border-radius: 4px; padding: 8px; height: 100%; }
 .fn-title { font-size: 13px; color: #606266; margin-bottom: 6px; }
