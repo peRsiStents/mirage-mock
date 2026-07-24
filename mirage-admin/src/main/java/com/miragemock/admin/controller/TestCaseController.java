@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -54,10 +55,10 @@ public class TestCaseController {
         return Result.ok();
     }
 
-    /** 运行（proxy：后端转发 + 断言求值 + 记录历史） */
+    /** 运行（proxy：后端转发 + 断言求值 + 记录历史；可选 envId 指定环境） */
     @PostMapping("/testcases/{id}/run")
-    public Result<RunResult> run(@PathVariable Long id) {
-        return Result.ok(service.run(id));
+    public Result<RunResult> run(@PathVariable Long id, @RequestParam(required = false) Long envId) {
+        return Result.ok(service.run(id, envId));
     }
 
     /** 运行历史（最近 100 条） */

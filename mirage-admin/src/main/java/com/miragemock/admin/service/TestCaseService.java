@@ -5,11 +5,13 @@ import com.jayway.jsonpath.JsonPath;
 import com.miragemock.admin.dto.RunResult;
 import com.miragemock.admin.mapper.TestCaseMapper;
 import com.miragemock.admin.mapper.TestRunLogMapper;
+import com.miragemock.admin.mapper.TestEnvironmentMapper;
 import com.miragemock.admin.mapper.TestVariableMapper;
 import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.TestCase;
 import com.miragemock.common.entity.TestRunLog;
+import com.miragemock.common.entity.TestEnvironment;
 import com.miragemock.common.entity.TestVariable;
 import com.miragemock.common.exception.BizException;
 import com.miragemock.common.util.JsonUtils;
@@ -46,6 +48,7 @@ public class TestCaseService {
     private final TestCaseMapper caseMapper;
     private final TestRunLogMapper logMapper;
     private final TestVariableMapper variableMapper;
+    private final TestEnvironmentMapper environmentMapper;
     private final RestTemplate restTemplate;
     private final ExpressionEvaluator evaluator;
     private final SecretResolver secretResolver;
@@ -53,11 +56,12 @@ public class TestCaseService {
 
     @Autowired
     public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestVariableMapper variableMapper,
-                           RestTemplate restTemplate, ExpressionEvaluator evaluator,
-                           SecretResolver secretResolver, SeqProvider seqProvider) {
+                           TestEnvironmentMapper environmentMapper, RestTemplate restTemplate,
+                           ExpressionEvaluator evaluator, SecretResolver secretResolver, SeqProvider seqProvider) {
         this.caseMapper = caseMapper;
         this.logMapper = logMapper;
         this.variableMapper = variableMapper;
+        this.environmentMapper = environmentMapper;
         this.restTemplate = restTemplate;
         this.evaluator = evaluator;
         this.secretResolver = secretResolver;
@@ -125,23 +129,28 @@ public class TestCaseService {
 
     // ============ 运行（proxy） ============
 
-    public RunResult run(Long id) {
-        return runProxy(get(id));
-    }
-
-    private RunResult runProxy(TestCase tc) {
-        RunResult rr = new RunResult();
-        rr.setAssertions(new ArrayList<>());
-
-        EvalContext ctx;
+    public RunResult run(Long id, Long envId) {
+        TestCase tc = get(id);
+        RunResult rr;
         try {
-            ctx = buildEvalContext(tc);
+            rr = executeCase(tc, buildEvalContext(tc.getProjectId(), envId, null));
         } catch (Exception e) {
+            rr = new RunResult();
+            rr.setAssertions(new ArrayList<>());
             rr.setError("上下文初始化失败: " + rootMessage(e));
             rr.setPassed(false);
-            writeLog(tc, "proxy", rr);
-            return rr;
         }
+        writeLog(tc, "proxy", rr);
+        return rr;
+    }
+
+    /**
+     * 执行单个用例：求值 URL/头/体 → RestTemplate 转发 → 断言求值，返回结果。
+     * 不写 test_run_log，供单用例运行与场景步骤复用。
+     */
+    public RunResult executeCase(TestCase tc, EvalContext ctx) {
+        RunResult rr = new RunResult();
+        rr.setAssertions(new ArrayList<>());
 
         String fullUrl;
         HttpHeaders httpHeaders;
@@ -156,12 +165,10 @@ public class TestCaseService {
         } catch (BizException e) {
             rr.setError(e.getMessage());
             rr.setPassed(false);
-            writeLog(tc, "proxy", rr);
             return rr;
         } catch (Exception e) {
             rr.setError("用例配置有误: " + rootMessage(e));
             rr.setPassed(false);
-            writeLog(tc, "proxy", rr);
             return rr;
         }
 
@@ -189,8 +196,47 @@ public class TestCaseService {
             }
         }
         rr.setPassed(allPassed && rr.getError() == null);
-        writeLog(tc, "proxy", rr);
         return rr;
+    }
+
+    /** 从响应提取变量（供场景步骤间传递）。返回 Map 键为 var.<name> */
+    public Map<String, Object> extract(RunResult rr, List<Map<String, Object>> extractors) {
+        Map<String, Object> out = new HashMap<>();
+        if (extractors == null || rr == null) {
+            return out;
+        }
+        for (Map<String, Object> e : extractors) {
+            String varName = str(e.get("var"));
+            String source = str(e.get("source"));
+            String expr = str(e.get("expr"));
+            if (varName.isEmpty()) {
+                continue;
+            }
+            Object value = "";
+            try {
+                switch (source) {
+                    case "status":
+                        value = rr.getHttpStatus() == null ? "" : String.valueOf(rr.getHttpStatus());
+                        break;
+                    case "header":
+                        Map<String, String> hs = rr.getHeaders();
+                        value = hs == null ? "" : hs.get(expr.toLowerCase());
+                        break;
+                    case "body":
+                        value = rr.getBody() == null ? "" : rr.getBody();
+                        break;
+                    case "jsonPath":
+                        value = readJsonPath(rr.getBody(), expr);
+                        break;
+                    default:
+                        continue;
+                }
+            } catch (Exception ex) {
+                value = "";
+            }
+            out.put("var." + varName, value);
+        }
+        return out;
     }
 
     public List<TestRunLog> runs(Long caseId) {
@@ -273,6 +319,16 @@ public class TestCaseService {
 
     private String buildUrl(TestCase tc, EvalContext ctx) {
         String url = eval(tc.getUrl() == null ? "" : tc.getUrl().trim(), ctx);
+        // 相对路径拼接环境 baseUrl（绝对 http(s):// 原样）
+        if (!url.isEmpty() && !url.toLowerCase().startsWith("http://") && !url.toLowerCase().startsWith("https://")) {
+            Object base = ctx.getVariable("__base_url");
+            if (base != null && !base.toString().isEmpty()) {
+                String b = base.toString();
+                boolean bSlash = b.endsWith("/");
+                boolean uSlash = url.startsWith("/");
+                url = b + (bSlash && uSlash ? url.substring(1) : (!bSlash && !uSlash ? "/" + url : url));
+            }
+        }
         List<Map<String, Object>> params = parseList(tc.getQuery());
         if (params.isEmpty()) {
             return url;
@@ -325,16 +381,36 @@ public class TestCaseService {
 
     // ============ 变量/常量（项目级） + 求值 ============
 
-    /** 构建求值上下文：var.<name> = 项目变量值；注入 seq/密钥 SPI（projectId） */
-    private EvalContext buildEvalContext(TestCase tc) {
+    /**
+     * 构建求值上下文：合并 项目变量 + 环境变量 + 运行时(提取)变量 到 var.*，
+     * 优先级 提取 > 环境 > 项目；环境 baseUrl 注入 __base_url（供相对URL拼接）。
+     */
+    public EvalContext buildEvalContext(Long projectId, Long envId, Map<String, Object> extraVars) {
         Map<String, Object> vars = new HashMap<>();
         for (TestVariable v : variableMapper.selectList(new LambdaQueryWrapper<TestVariable>()
-                .eq(TestVariable::getProjectId, tc.getProjectId()))) {
+                .eq(TestVariable::getProjectId, projectId))) {
             if (v.getName() != null && !v.getName().isEmpty()) {
                 vars.put("var." + v.getName(), v.getVarValue());
             }
         }
-        return new EvalContext(vars, secretResolver, seqProvider, tc.getProjectId());
+        if (envId != null) {
+            TestEnvironment env = environmentMapper.selectById(envId);
+            if (env != null) {
+                if (env.getBaseUrl() != null && !env.getBaseUrl().isEmpty()) {
+                    vars.put("__base_url", env.getBaseUrl());
+                }
+                for (Map<String, Object> p : parseList(env.getVariables())) {
+                    String n = str(p.get("name"));
+                    if (!n.isEmpty()) {
+                        vars.put("var." + n, p.get("value"));
+                    }
+                }
+            }
+        }
+        if (extraVars != null) {
+            vars.putAll(extraVars);
+        }
+        return new EvalContext(vars, secretResolver, seqProvider, projectId);
     }
 
     /** 求值含 ${...} 的字段（${var.x} / DSL 函数）；无 ${...} 原样返回 */

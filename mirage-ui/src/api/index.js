@@ -72,7 +72,7 @@ export const api = {
     create: (pid, t) => http.post(`/projects/${pid}/testcases`, t),
     update: (id, t) => http.put(`/testcases/${id}`, t),
     remove: (id) => http.delete(`/testcases/${id}`),
-    run: (id) => http.post(`/testcases/${id}/run`),
+    run: (id, envId) => http.post(`/testcases/${id}/run`, null, { params: { envId } }),
     runs: (id) => http.get(`/testcases/${id}/runs`)
   },
   testVariables: {
@@ -80,5 +80,24 @@ export const api = {
     create: (pid, v) => http.post(`/projects/${pid}/test-variables`, v),
     update: (id, v) => http.put(`/test-variables/${id}`, v),
     remove: (id) => http.delete(`/test-variables/${id}`)
+  },
+  environments: {
+    list: (pid) => http.get(`/projects/${pid}/environments`),
+    create: (pid, e) => http.post(`/projects/${pid}/environments`, e),
+    update: (id, e) => http.put(`/environments/${id}`, e),
+    remove: (id) => http.delete(`/environments/${id}`)
+  },
+  scenarios: {
+    list: (pid) => http.get(`/projects/${pid}/scenarios`),
+    create: (pid, s) => http.post(`/projects/${pid}/scenarios`, s),
+    update: (id, s) => http.put(`/scenarios/${id}`, s),
+    remove: (id) => http.delete(`/scenarios/${id}`),
+    steps: (id) => http.get(`/scenarios/${id}/steps`),
+    saveSteps: (id, steps) => http.put(`/scenarios/${id}/steps`, steps),
+    run: (id, envId) => http.post(`/scenarios/${id}/run`, null, { params: { envId } })
+  },
+  records: {
+    query: (pid, params) => http.get(`/projects/${pid}/records`, { params }),
+    get: (id) => http.get(`/records/${id}`)
   }
 }

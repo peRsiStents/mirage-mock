@@ -16,6 +16,9 @@ const routes = [
       { path: 'functions', name: 'functions', component: () => import('../views/Functions.vue') },
       { path: 'file-gen', name: 'file-gen', component: () => import('../views/FileGen.vue') },
       { path: 'testcases', name: 'testcases', component: () => import('../views/TestCases.vue') },
+      { path: 'scenarios', name: 'scenarios', component: () => import('../views/Scenarios.vue') },
+      { path: 'environments', name: 'environments', component: () => import('../views/Environments.vue') },
+      { path: 'reports', name: 'reports', component: () => import('../views/TestReports.vue') },
       { path: 'users', name: 'users', component: () => import('../views/Users.vue'), meta: { admin: true } }
     ]
   }
