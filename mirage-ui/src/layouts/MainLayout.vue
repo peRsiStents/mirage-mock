@@ -87,19 +87,20 @@ watch(() => proj.id, (v) => { projId.value = v })
 
 <style scoped>
 .logo {
-  height: 72px;
+  height: 56px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 8px;
 }
 .logo-img {
-  height: 40px;
+  height: 32px;
 }
 .logo-text {
   color: #fff;
-  font-size: 13px;
+  font-size: 18px;
+  font-weight: 600;
   letter-spacing: 2px;
 }
 .topbar {

@@ -3,7 +3,7 @@
     <el-card class="login-card">
       <div class="logo-wrap"><img :src="logoDark" class="brand-logo" alt="蜃楼" /></div>
       <div class="title">蜃楼</div>
-      <div class="subtitle">海市蜃楼，以假乱真。</div>
+      <div class="subtitle">海市蜃楼，'以假乱真'恰好是MOCK的本质。</div>
       <el-form :model="form" label-position="top" @submit.prevent="onLogin" autocomplete="off">
         <el-form-item label="用户名">
           <el-input v-model="form.username" placeholder="请输入用户名" autocomplete="off" name="mirage-user" />
