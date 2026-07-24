@@ -6,7 +6,9 @@
         <div class="card-header"><span>请求日志 <el-tag size="small">{{ proj.name }}</el-tag></span></div>
       </template>
       <div class="filters">
-        <el-input v-model="filters.interfaceId" placeholder="接口 ID" style="width: 130px" clearable />
+        <el-select v-model="filters.interfaceId" placeholder="接口" style="width: 200px" clearable filterable>
+          <el-option v-for="it in interfaces" :key="it.id" :label="it.name" :value="it.id" />
+        </el-select>
         <el-select v-model="filters.matched" placeholder="命中" style="width: 110px" clearable>
           <el-option label="命中" :value="1" /><el-option label="未命中" :value="0" />
         </el-select>
@@ -23,8 +25,15 @@
             <el-tag :type="row.matched === 1 ? 'success' : 'danger'" size="small">{{ row.matched === 1 ? '命中' : '未命中' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="interfaceId" label="接口" width="150" />
-        <el-table-column prop="ruleId" label="规则" width="150" />
+        <el-table-column label="项目" width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.projectName || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="接口" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.interfaceName || (row.interfaceId ? '#' + row.interfaceId : '—') }}</template>
+        </el-table-column>
+        <el-table-column label="规则" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.ruleName || (row.ruleId ? '#' + row.ruleId : '—') }}</template>
+        </el-table-column>
         <el-table-column prop="costMs" label="耗时ms" width="90" />
         <el-table-column label="操作" width="90">
           <template #default="{ row }"><el-button size="small" link @click="showDetail(row)">详情</el-button></template>
@@ -65,6 +74,12 @@ const page = reactive({ current: 1, size: 20, total: 0 })
 const detailVisible = ref(false)
 const detail = ref({})
 
+const interfaces = ref([])
+async function loadInterfaces() {
+  if (!proj.id) return
+  try { const res = await api.interfaces.list(proj.id); interfaces.value = res.data || [] } catch (e) { interfaces.value = [] }
+}
+
 function rowClass({ row }) {
   return row.matched === 1 ? '' : 'row-unmatched'
 }
@@ -99,8 +114,8 @@ function showDetail(row) {
   detailVisible.value = true
 }
 
-watch(() => proj.id, load)
-onMounted(load)
+watch(() => proj.id, () => { load(); loadInterfaces() })
+onMounted(() => { load(); loadInterfaces() })
 </script>
 
 <style scoped>

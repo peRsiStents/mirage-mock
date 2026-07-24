@@ -5,7 +5,10 @@
       <template #header>
         <div class="card-header">
           <span>测试用例 <el-tag size="small">{{ proj.name }}</el-tag></span>
-          <el-button type="primary" :icon="Plus" @click="openCreate">新建用例</el-button>
+          <div>
+            <el-button @click="openVariables">变量/常量</el-button>
+            <el-button type="primary" :icon="Plus" @click="openCreate">新建用例</el-button>
+          </div>
         </div>
       </template>
       <el-table :data="list" v-loading="loading" border stripe>
@@ -42,6 +45,12 @@
           </el-col>
         </el-row>
         <el-divider content-position="left">请求</el-divider>
+        <div class="hint">
+          URL/请求头/查询/Body 支持 <span class="mono">${var.变量名}</span> 与函数（如 <span class="mono">${uuid()}</span>、<span class="mono">${int(1,100)}</span>，函数仅「后端转发」模式求值）。
+          点变量名复制引用：
+          <el-tag v-for="v in variables" :key="v.id" size="small" style="margin:0 4px;cursor:pointer" @click="copyVar(v)">{{ v.name }}</el-tag>
+          <span v-if="!variables.length" class="muted">（先到「变量/常量」添加）</span>
+        </div>
         <el-row :gutter="8" style="margin-bottom:6px">
           <el-col :span="4">
             <el-select v-model="form.method">
@@ -73,7 +82,14 @@
             <el-option label="表单 form" value="form" /><el-option label="原始 raw" value="raw" />
           </el-select>
         </div>
-        <textarea v-if="form.bodyType !== 'none'" v-model="form.body" class="body-area" rows="4" spellcheck="false" placeholder='{"key":"value"}'></textarea>
+        <el-row :gutter="8" v-if="form.bodyType !== 'none'">
+          <el-col :span="17">
+            <textarea ref="bodyArea" v-model="form.body" class="body-area" rows="4" spellcheck="false" placeholder='{"key":"${var.x}"}'></textarea>
+          </el-col>
+          <el-col :span="7">
+            <div class="fn-panel"><div class="fn-title">函数市场 · 插入光标处</div><FunctionMarketSidebar :project-id="proj.id" @insert="insertBodyFn" /></div>
+          </el-col>
+        </el-row>
 
         <el-divider content-position="left">curl 导入</el-divider>
         <el-input v-model="curlText" type="textarea" :rows="2" placeholder="粘贴 curl 命令，点解析自动填充上方请求" />
@@ -139,16 +155,49 @@
         <el-table-column prop="error" label="错误" show-overflow-tooltip />
       </el-table>
     </el-dialog>
+
+    <!-- 变量 / 常量 管理 -->
+    <el-dialog v-model="varVisible" title="变量 / 常量（项目级）" width="660px">
+      <div style="margin-bottom:8px">
+        <span class="muted">在用例里用 ${var.name} 引用；值可为常量或含 ${...} 函数（运行时后端转发模式求值）</span>
+        <el-button size="small" type="primary" :icon="Plus" style="float:right" @click="openVarCreate">新增</el-button>
+      </div>
+      <el-table :data="variables" size="small" border>
+        <el-table-column prop="name" label="名称" width="150" />
+        <el-table-column prop="varValue" label="值" show-overflow-tooltip />
+        <el-table-column prop="remark" label="备注" width="130" show-overflow-tooltip />
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" link @click="openVarEdit(row)">编辑</el-button>
+            <el-button size="small" type="danger" link @click="onVarRemove(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-dialog v-model="varFormVisible" :title="varForm.id ? '编辑变量' : '新增变量'" width="460px" append-to-body>
+        <el-form :model="varForm" label-width="64px">
+          <el-form-item label="名称"><el-input v-model="varForm.name" :disabled="!!varForm.id" placeholder="如 host / token" /></el-form-item>
+          <el-form-item label="值"><el-input v-model="varForm.varValue" placeholder="常量 或 含 ${...} 函数" /></el-form-item>
+          <el-form-item label="备注"><el-input v-model="varForm.remark" /></el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="varFormVisible = false">取消</el-button>
+          <el-button type="primary" @click="onVarSave">保存</el-button>
+        </template>
+      </el-dialog>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
 import { parseCurl } from '../utils/curl'
+import { copyText } from '../utils/clipboard'
+import FunctionMarketSidebar from '../components/FunctionMarketSidebar.vue'
 
 const proj = useProjectStore()
 const list = ref([])
@@ -168,6 +217,13 @@ const respHeaders = computed(() => {
 
 const historyVisible = ref(false)
 const history = ref([])
+
+// 变量/常量
+const variables = ref([])
+const varVisible = ref(false)
+const varFormVisible = ref(false)
+const varForm = reactive({ id: null, name: '', varValue: '', remark: '' })
+const bodyArea = ref(null)
 
 const METHODS_TAG = { GET: 'success', POST: 'warning', PUT: 'primary', DELETE: 'danger' }
 function mTag(m) { return METHODS_TAG[m] || 'info' }
@@ -261,13 +317,19 @@ async function onRun(row) {
 }
 
 async function runDirect() {
+  // 浏览器直发：仅支持 ${var.变量名} 客户端替换；DSL 函数需后端转发(proxy)
+  const rawFields = [form.url, ...(form.headers || []).map((h) => h.v), form.body]
+  if (rawFields.some((f) => /\$\{(?!var\.)/.test(f || ''))) {
+    showResult({ error: '浏览器直发不支持 DSL 函数（如 ${uuid()}），仅支持 ${var.变量名}。请改用「后端转发」模式。', passed: false, assertions: [], mode: 'direct' })
+    return
+  }
   const headers = {}
-  form.headers.filter((h) => h.k).forEach((h) => { headers[h.k] = h.v })
+  form.headers.filter((h) => h.k).forEach((h) => { headers[substituteVars(h.k)] = substituteVars(h.v) })
   const opts = { method: form.method, headers }
-  if (form.bodyType !== 'none' && form.body) opts.body = form.body
+  if (form.bodyType !== 'none' && form.body) opts.body = substituteVars(form.body)
   const t0 = Date.now()
   try {
-    const resp = await fetch(buildUrl(form), opts)
+    const resp = await fetch(substituteVars(buildUrl(form)), opts)
     const text = await resp.text()
     const rh = {}
     resp.headers.forEach((v, k) => { rh[k.toLowerCase()] = v })
@@ -276,6 +338,66 @@ async function runDirect() {
   } catch (e) {
     showResult({ error: '请求失败：可能是目标未允许跨域(CORS)，请改用「后端转发」模式。' + e.message, passed: false, assertions: [], mode: 'direct' })
   }
+}
+
+// ${var.name} 客户端替换（direct 模式用）
+function substituteVars(text) {
+  if (!text) return text
+  return text.replace(/\$\{var\.([a-zA-Z_][\w]*)\}/g, (m, name) => {
+    const v = variables.value.find((x) => x.name === name)
+    return v ? (v.varValue || '') : m
+  })
+}
+
+function insertBodyFn(text) {
+  const cur = form.body || ''
+  const el = bodyArea.value
+  if (!el) { form.body = cur + text; return }
+  const s = el.selectionStart || 0
+  const e = el.selectionEnd || 0
+  form.body = cur.slice(0, s) + text + cur.slice(e)
+  nextTick(() => { el.focus(); el.selectionStart = el.selectionEnd = s + text.length })
+}
+
+function copyVar(v) {
+  copyText('${var.' + v.name + '}')
+}
+
+// ===== 变量/常量 CRUD =====
+async function loadVariables() {
+  if (!proj.id) return
+  try { const res = await api.testVariables.list(proj.id); variables.value = res.data || [] } catch (e) { variables.value = [] }
+}
+
+async function openVariables() {
+  await loadVariables()
+  varVisible.value = true
+}
+
+function openVarCreate() {
+  Object.assign(varForm, { id: null, name: '', varValue: '', remark: '' })
+  varFormVisible.value = true
+}
+
+function openVarEdit(row) {
+  Object.assign(varForm, { id: row.id, name: row.name, varValue: row.varValue || '', remark: row.remark || '' })
+  varFormVisible.value = true
+}
+
+async function onVarSave() {
+  if (!varForm.name.trim()) { ElMessage.warning('请填变量名'); return }
+  if (varForm.id) { await api.testVariables.update(varForm.id, { varValue: varForm.varValue, remark: varForm.remark }) }
+  else { await api.testVariables.create(proj.id, { ...varForm }) }
+  ElMessage.success('已保存')
+  varFormVisible.value = false
+  loadVariables()
+}
+
+async function onVarRemove(row) {
+  await ElMessageBox.confirm(`删除变量「${row.name}」？`, '警告', { type: 'warning' })
+  await api.testVariables.remove(row.id)
+  ElMessage.success('已删除')
+  loadVariables()
 }
 
 function evalAssertionsClient(status, headers, body, assertions) {
@@ -314,8 +436,8 @@ async function onRemove(row) {
   ElMessage.success('已删除'); load()
 }
 
-watch(() => proj.id, load)
-onMounted(load)
+watch(() => proj.id, () => { load(); loadVariables() })
+onMounted(() => { load(); loadVariables() })
 </script>
 
 <style scoped>
@@ -324,6 +446,9 @@ onMounted(load)
 .muted { color: #909399; font-size: 12px; }
 .kv-title { font-size: 13px; color: #606266; margin: 8px 0 4px; display: flex; align-items: center; }
 .kv-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.hint { font-size: 12px; color: #909399; margin: 4px 0 8px; line-height: 1.7; }
+.fn-panel { border: 1px solid #ebeef5; border-radius: 4px; padding: 8px; }
+.fn-title { font-size: 12px; color: #606266; margin-bottom: 6px; }
 .body-area { width: 100%; font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 13px; padding: 8px;
   border: 1px solid #dcdfe6; border-radius: 4px; resize: vertical; box-sizing: border-box; }
 .resp { background: #f5f7fa; padding: 10px; border-radius: 4px; max-height: 240px; overflow: auto;

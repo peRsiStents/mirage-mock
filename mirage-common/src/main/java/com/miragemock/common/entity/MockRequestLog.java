@@ -45,4 +45,14 @@ public class MockRequestLog {
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
+
+    // ===== 以下为展示用，不入库（日志查询时按 id 批量回填名称）=====
+    @TableField(exist = false)
+    private String projectName;
+
+    @TableField(exist = false)
+    private String interfaceName;
+
+    @TableField(exist = false)
+    private String ruleName;
 }

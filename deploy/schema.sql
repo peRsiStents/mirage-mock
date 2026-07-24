@@ -188,3 +188,16 @@ CREATE TABLE test_run_log (
     update_time      DATETIME
 );
 CREATE INDEX idx_runlog_case ON test_run_log (case_id, create_time);
+
+-- ===== P2: 测试变量/常量 =====
+CREATE TABLE test_variable (
+    id          BIGINT       NOT NULL PRIMARY KEY,
+    project_id  BIGINT       NOT NULL,
+    name        VARCHAR(64)  NOT NULL,
+    var_value   VARCHAR(1024),
+    remark      VARCHAR(256),
+    status      TINYINT      DEFAULT 1,
+    create_time DATETIME,
+    update_time DATETIME
+);
+CREATE INDEX idx_testvar_project ON test_variable (project_id);

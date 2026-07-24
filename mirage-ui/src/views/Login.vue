@@ -4,12 +4,12 @@
       <div class="logo-wrap"><img :src="logoDark" class="brand-logo" alt="蜃楼 Mock" /></div>
       <div class="title">蜃楼 Mock</div>
       <div class="subtitle">接口 Mock 数据生成系统</div>
-      <el-form :model="form" label-position="top" @submit.prevent="onLogin">
+      <el-form :model="form" label-position="top" @submit.prevent="onLogin" autocomplete="off">
         <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="admin" />
+          <el-input v-model="form.username" placeholder="请输入用户名" autocomplete="off" name="mirage-user" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="form.password" type="password" show-password placeholder="admin123" @keyup.enter="onLogin" />
+          <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" autocomplete="new-password" name="mirage-pwd" @keyup.enter="onLogin" />
         </el-form-item>
         <el-button type="primary" :loading="loading" style="width: 100%" @click="onLogin">登录</el-button>
       </el-form>
@@ -26,7 +26,7 @@ import logoDark from '../assets/logodark.png'
 
 const router = useRouter()
 const auth = useAuthStore()
-const form = reactive({ username: 'admin', password: 'admin123' })
+const form = reactive({ username: '', password: '' })
 const loading = ref(false)
 
 async function onLogin() {

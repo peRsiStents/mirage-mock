@@ -5,12 +5,18 @@ import com.jayway.jsonpath.JsonPath;
 import com.miragemock.admin.dto.RunResult;
 import com.miragemock.admin.mapper.TestCaseMapper;
 import com.miragemock.admin.mapper.TestRunLogMapper;
+import com.miragemock.admin.mapper.TestVariableMapper;
 import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.TestCase;
 import com.miragemock.common.entity.TestRunLog;
+import com.miragemock.common.entity.TestVariable;
 import com.miragemock.common.exception.BizException;
 import com.miragemock.common.util.JsonUtils;
+import com.miragemock.dsl.eval.EvalContext;
+import com.miragemock.dsl.eval.ExpressionEvaluator;
+import com.miragemock.dsl.spi.SecretResolver;
+import com.miragemock.dsl.spi.SeqProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -24,6 +30,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,13 +45,23 @@ public class TestCaseService {
 
     private final TestCaseMapper caseMapper;
     private final TestRunLogMapper logMapper;
+    private final TestVariableMapper variableMapper;
     private final RestTemplate restTemplate;
+    private final ExpressionEvaluator evaluator;
+    private final SecretResolver secretResolver;
+    private final SeqProvider seqProvider;
 
     @Autowired
-    public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, RestTemplate restTemplate) {
+    public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestVariableMapper variableMapper,
+                           RestTemplate restTemplate, ExpressionEvaluator evaluator,
+                           SecretResolver secretResolver, SeqProvider seqProvider) {
         this.caseMapper = caseMapper;
         this.logMapper = logMapper;
+        this.variableMapper = variableMapper;
         this.restTemplate = restTemplate;
+        this.evaluator = evaluator;
+        this.secretResolver = secretResolver;
+        this.seqProvider = seqProvider;
     }
 
     // ============ CRUD ============
@@ -116,15 +133,25 @@ public class TestCaseService {
         RunResult rr = new RunResult();
         rr.setAssertions(new ArrayList<>());
 
+        EvalContext ctx;
+        try {
+            ctx = buildEvalContext(tc);
+        } catch (Exception e) {
+            rr.setError("上下文初始化失败: " + rootMessage(e));
+            rr.setPassed(false);
+            writeLog(tc, "proxy", rr);
+            return rr;
+        }
+
         String fullUrl;
         HttpHeaders httpHeaders;
         String body;
         HttpMethod method;
         try {
-            fullUrl = buildUrl(tc);
+            fullUrl = buildUrl(tc, ctx);
             validateScheme(fullUrl);
-            httpHeaders = buildHeaders(tc);
-            body = useBody(tc);
+            httpHeaders = buildHeaders(tc, ctx);
+            body = useBody(tc, ctx);
             method = HttpMethod.valueOf(tc.getMethod().toUpperCase());
         } catch (BizException e) {
             rr.setError(e.getMessage());
@@ -153,6 +180,7 @@ public class TestCaseService {
         // 断言求值
         boolean allPassed = true;
         for (Map<String, Object> a : parseList(tc.getAssertions())) {
+            a.put("expected", eval(str(a.get("expected")), ctx));
             Map<String, Object> r = evalAssertion(a,
                     rr.getHttpStatus() == null ? 0 : rr.getHttpStatus(), rr.getHeaders(), rr.getBody());
             rr.getAssertions().add(r);
@@ -243,8 +271,8 @@ public class TestCaseService {
 
     // ============ 请求构建 ============
 
-    private String buildUrl(TestCase tc) {
-        String url = tc.getUrl() == null ? "" : tc.getUrl().trim();
+    private String buildUrl(TestCase tc, EvalContext ctx) {
+        String url = eval(tc.getUrl() == null ? "" : tc.getUrl().trim(), ctx);
         List<Map<String, Object>> params = parseList(tc.getQuery());
         if (params.isEmpty()) {
             return url;
@@ -253,7 +281,7 @@ public class TestCaseService {
         String sep = url.contains("?") ? "&" : "?";
         for (Map<String, Object> p : params) {
             String k = str(p.get("k"));
-            String v = str(p.get("v"));
+            String v = eval(str(p.get("v")), ctx);
             if (k.isEmpty()) {
                 continue;
             }
@@ -267,11 +295,11 @@ public class TestCaseService {
         return sb.toString();
     }
 
-    private HttpHeaders buildHeaders(TestCase tc) {
+    private HttpHeaders buildHeaders(TestCase tc, EvalContext ctx) {
         HttpHeaders h = new HttpHeaders();
         for (Map<String, Object> p : parseList(tc.getHeaders())) {
             String k = str(p.get("k"));
-            String v = str(p.get("v"));
+            String v = eval(str(p.get("v")), ctx);
             if (!k.isEmpty()) {
                 h.add(k, v);
             }
@@ -287,12 +315,82 @@ public class TestCaseService {
         return h;
     }
 
-    private String useBody(TestCase tc) {
+    private String useBody(TestCase tc, EvalContext ctx) {
         String bt = tc.getBodyType() == null ? "none" : tc.getBodyType().toLowerCase();
         if ("none".equals(bt)) {
             return null;
         }
-        return tc.getBody();
+        return eval(tc.getBody(), ctx);
+    }
+
+    // ============ 变量/常量（项目级） + 求值 ============
+
+    /** 构建求值上下文：var.<name> = 项目变量值；注入 seq/密钥 SPI（projectId） */
+    private EvalContext buildEvalContext(TestCase tc) {
+        Map<String, Object> vars = new HashMap<>();
+        for (TestVariable v : variableMapper.selectList(new LambdaQueryWrapper<TestVariable>()
+                .eq(TestVariable::getProjectId, tc.getProjectId()))) {
+            if (v.getName() != null && !v.getName().isEmpty()) {
+                vars.put("var." + v.getName(), v.getVarValue());
+            }
+        }
+        return new EvalContext(vars, secretResolver, seqProvider, tc.getProjectId());
+    }
+
+    /** 求值含 ${...} 的字段（${var.x} / DSL 函数）；无 ${...} 原样返回 */
+    private String eval(String s, EvalContext ctx) {
+        if (s == null || s.isEmpty() || !s.contains("${")) {
+            return s;
+        }
+        try {
+            Object v = evaluator.evalTemplate(s, ctx);
+            return v == null ? s : ExpressionEvaluator.stringify(v);
+        } catch (Exception e) {
+            throw new BizException(ResultCode.EXPRESSION_ERROR, "字段求值失败: " + rootMessage(e));
+        }
+    }
+
+    public List<TestVariable> listVariables(Long projectId) {
+        return variableMapper.selectList(new LambdaQueryWrapper<TestVariable>()
+                .eq(TestVariable::getProjectId, projectId).orderByAsc(TestVariable::getName));
+    }
+
+    @Transactional
+    public TestVariable createVariable(TestVariable v) {
+        if (v.getProjectId() == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "projectId 不能为空");
+        }
+        if (v.getName() == null || v.getName().trim().isEmpty()) {
+            throw new BizException(ResultCode.BAD_REQUEST, "变量名不能为空");
+        }
+        Long c = variableMapper.selectCount(new LambdaQueryWrapper<TestVariable>()
+                .eq(TestVariable::getProjectId, v.getProjectId()).eq(TestVariable::getName, v.getName()));
+        if (c != null && c > 0) {
+            throw new BizException(ResultCode.CONFLICT, "变量名已存在: " + v.getName());
+        }
+        if (v.getStatus() == null) {
+            v.setStatus(Constants.STATUS_ENABLED);
+        }
+        variableMapper.insert(v);
+        return v;
+    }
+
+    @Transactional
+    public TestVariable updateVariable(Long id, TestVariable patch) {
+        TestVariable exists = variableMapper.selectById(id);
+        if (exists == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "变量不存在");
+        }
+        if (patch.getVarValue() != null) exists.setVarValue(patch.getVarValue());
+        if (patch.getRemark() != null) exists.setRemark(patch.getRemark());
+        if (patch.getStatus() != null) exists.setStatus(patch.getStatus());
+        variableMapper.updateById(exists);
+        return exists;
+    }
+
+    @Transactional
+    public void deleteVariable(Long id) {
+        variableMapper.deleteById(id);
     }
 
     private void validateScheme(String url) {

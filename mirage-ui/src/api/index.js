@@ -74,5 +74,11 @@ export const api = {
     remove: (id) => http.delete(`/testcases/${id}`),
     run: (id) => http.post(`/testcases/${id}/run`),
     runs: (id) => http.get(`/testcases/${id}/runs`)
+  },
+  testVariables: {
+    list: (pid) => http.get(`/projects/${pid}/test-variables`),
+    create: (pid, v) => http.post(`/projects/${pid}/test-variables`, v),
+    update: (id, v) => http.put(`/test-variables/${id}`, v),
+    remove: (id) => http.delete(`/test-variables/${id}`)
   }
 }

@@ -5,6 +5,7 @@ import com.miragemock.admin.service.TestCaseService;
 import com.miragemock.common.api.Result;
 import com.miragemock.common.entity.TestCase;
 import com.miragemock.common.entity.TestRunLog;
+import com.miragemock.common.entity.TestVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -63,5 +64,29 @@ public class TestCaseController {
     @GetMapping("/testcases/{id}/runs")
     public Result<List<TestRunLog>> runs(@PathVariable Long id) {
         return Result.ok(service.runs(id));
+    }
+
+    // ============ 测试变量/常量（项目级） ============
+
+    @GetMapping("/projects/{pid}/test-variables")
+    public Result<List<TestVariable>> listVariables(@PathVariable Long pid) {
+        return Result.ok(service.listVariables(pid));
+    }
+
+    @PostMapping("/projects/{pid}/test-variables")
+    public Result<TestVariable> createVariable(@PathVariable Long pid, @RequestBody TestVariable v) {
+        v.setProjectId(pid);
+        return Result.ok(service.createVariable(v));
+    }
+
+    @PutMapping("/test-variables/{id}")
+    public Result<TestVariable> updateVariable(@PathVariable Long id, @RequestBody TestVariable v) {
+        return Result.ok(service.updateVariable(id, v));
+    }
+
+    @DeleteMapping("/test-variables/{id}")
+    public Result<Void> deleteVariable(@PathVariable Long id) {
+        service.deleteVariable(id);
+        return Result.ok();
     }
 }
