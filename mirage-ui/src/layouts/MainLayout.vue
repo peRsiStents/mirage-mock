@@ -2,8 +2,8 @@
   <el-container style="height: 100vh">
     <el-aside width="210px" style="background: #001529">
       <div class="logo">
-        <img :src="logoLight" class="logo-img" alt="蜃楼 Mock" />
-        <span class="logo-text">蜃楼 Mock</span>
+        <img :src="logoLight" class="logo-img" alt="蜃楼" />
+        <span class="logo-text">蜃楼</span>
       </div>
       <el-menu :default-active="route.path" :router="true" background-color="#001529" text-color="#cfd8e3" active-text-color="#409eff">
         <el-menu-item index="/projects"><el-icon><Files /></el-icon><span>项目管理</span></el-menu-item>

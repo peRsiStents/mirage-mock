@@ -1,9 +1,9 @@
 <template>
   <div class="login-wrap">
     <el-card class="login-card">
-      <div class="logo-wrap"><img :src="logoDark" class="brand-logo" alt="蜃楼 Mock" /></div>
-      <div class="title">蜃楼 Mock</div>
-      <div class="subtitle">接口 Mock 数据生成系统</div>
+      <div class="logo-wrap"><img :src="logoDark" class="brand-logo" alt="蜃楼" /></div>
+      <div class="title">蜃楼</div>
+      <div class="subtitle">海市蜃楼，以假乱真。</div>
       <el-form :model="form" label-position="top" @submit.prevent="onLogin" autocomplete="off">
         <el-form-item label="用户名">
           <el-input v-model="form.username" placeholder="请输入用户名" autocomplete="off" name="mirage-user" />
