@@ -64,6 +64,7 @@ async function onLogin() {
 .brand {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -80,6 +81,7 @@ async function onLogin() {
   color: #5b6b7c;
   font-size: 13px;
   line-height: 1.7;
+  text-align: center;
 }
 .sep {
   margin: 14px 0 20px;
