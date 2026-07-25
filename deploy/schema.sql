@@ -24,6 +24,7 @@ CREATE TABLE project (
     remark       VARCHAR(512),
     rule_version INT          DEFAULT 1,
     status       TINYINT      DEFAULT 1,
+    ci_token     VARCHAR(64),
     create_time  DATETIME,
     update_time  DATETIME,
     CONSTRAINT uk_project_code UNIQUE (code)
@@ -166,6 +167,7 @@ CREATE TABLE test_case (
     body_type  VARCHAR(16)  DEFAULT 'none',
     body       TEXT,
     assertions TEXT,
+    data_set   TEXT,
     mode       VARCHAR(16)  DEFAULT 'proxy',
     status     TINYINT      DEFAULT 1,
     remark     VARCHAR(512),
@@ -258,3 +260,22 @@ CREATE TABLE test_run_record (
     update_time   DATETIME
 );
 CREATE INDEX idx_record_project ON test_run_record (project_id, create_time);
+
+-- ===== Stage2: 定时任务 =====
+CREATE TABLE test_schedule (
+    id            BIGINT       NOT NULL PRIMARY KEY,
+    project_id    BIGINT       NOT NULL,
+    scenario_id   BIGINT       NOT NULL,
+    name          VARCHAR(128),
+    cron          VARCHAR(64)  NOT NULL,
+    env_id        BIGINT,
+    enabled       TINYINT      DEFAULT 1,
+    last_run_time DATETIME,
+    last_passed   TINYINT,
+    last_cost_ms  BIGINT,
+    remark        VARCHAR(256),
+    create_time   DATETIME,
+    update_time   DATETIME
+);
+CREATE INDEX idx_schedule_project ON test_schedule (project_id);
+CREATE INDEX idx_schedule_scenario ON test_schedule (scenario_id);

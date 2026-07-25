@@ -73,6 +73,7 @@ export const api = {
     update: (id, t) => http.put(`/testcases/${id}`, t),
     remove: (id) => http.delete(`/testcases/${id}`),
     run: (id, envId) => http.post(`/testcases/${id}/run`, null, { params: { envId } }),
+    runData: (id, envId) => http.post(`/testcases/${id}/run-data`, null, { params: { envId } }),
     runs: (id) => http.get(`/testcases/${id}/runs`)
   },
   testVariables: {
@@ -99,5 +100,13 @@ export const api = {
   records: {
     query: (pid, params) => http.get(`/projects/${pid}/records`, { params }),
     get: (id) => http.get(`/records/${id}`)
+  },
+  schedules: {
+    list: (pid) => http.get(`/projects/${pid}/schedules`),
+    create: (pid, s) => http.post(`/projects/${pid}/schedules`, s),
+    update: (id, s) => http.put(`/schedules/${id}`, s),
+    remove: (id) => http.delete(`/schedules/${id}`),
+    toggle: (id) => http.post(`/schedules/${id}/toggle`),
+    run: (id) => http.post(`/schedules/${id}/run`)
   }
 }

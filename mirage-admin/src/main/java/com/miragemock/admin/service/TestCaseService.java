@@ -2,15 +2,18 @@ package com.miragemock.admin.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jayway.jsonpath.JsonPath;
+import com.miragemock.admin.dto.CaseRunResult;
 import com.miragemock.admin.dto.RunResult;
 import com.miragemock.admin.mapper.TestCaseMapper;
 import com.miragemock.admin.mapper.TestRunLogMapper;
+import com.miragemock.admin.mapper.TestRunRecordMapper;
 import com.miragemock.admin.mapper.TestEnvironmentMapper;
 import com.miragemock.admin.mapper.TestVariableMapper;
 import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.TestCase;
 import com.miragemock.common.entity.TestRunLog;
+import com.miragemock.common.entity.TestRunRecord;
 import com.miragemock.common.entity.TestEnvironment;
 import com.miragemock.common.entity.TestVariable;
 import com.miragemock.common.exception.BizException;
@@ -47,6 +50,7 @@ public class TestCaseService {
 
     private final TestCaseMapper caseMapper;
     private final TestRunLogMapper logMapper;
+    private final TestRunRecordMapper recordMapper;
     private final TestVariableMapper variableMapper;
     private final TestEnvironmentMapper environmentMapper;
     private final RestTemplate restTemplate;
@@ -55,11 +59,13 @@ public class TestCaseService {
     private final SeqProvider seqProvider;
 
     @Autowired
-    public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestVariableMapper variableMapper,
-                           TestEnvironmentMapper environmentMapper, RestTemplate restTemplate,
-                           ExpressionEvaluator evaluator, SecretResolver secretResolver, SeqProvider seqProvider) {
+    public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestRunRecordMapper recordMapper,
+                           TestVariableMapper variableMapper, TestEnvironmentMapper environmentMapper,
+                           RestTemplate restTemplate, ExpressionEvaluator evaluator,
+                           SecretResolver secretResolver, SeqProvider seqProvider) {
         this.caseMapper = caseMapper;
         this.logMapper = logMapper;
+        this.recordMapper = recordMapper;
         this.variableMapper = variableMapper;
         this.environmentMapper = environmentMapper;
         this.restTemplate = restTemplate;
@@ -144,6 +150,84 @@ public class TestCaseService {
         return rr;
     }
 
+    /** 数据驱动运行：按 dataSet 行逐行跑，汇总并落 test_run_record(target_type=case) */
+    public CaseRunResult runData(Long id, Long envId) {
+        TestCase tc = get(id);
+        CaseRunResult res = new CaseRunResult();
+        res.setResults(new ArrayList<>());
+        List<Map<String, Object>> rows = parseList(tc.getDataSet());
+        if (rows.isEmpty()) {
+            RunResult rr;
+            try { rr = executeCase(tc, buildEvalContext(tc.getProjectId(), envId, null)); }
+            catch (Exception e) { rr = errorResult(e); }
+            writeLog(tc, "proxy", rr);
+            res.getResults().add(rr);
+            res.setTotal(1);
+            res.setPassedCount(Boolean.TRUE.equals(rr.getPassed()) ? 1 : 0);
+            res.setPassed(rr.getPassed());
+            return res;
+        }
+        Map<String, Object> baseVars;
+        try { baseVars = buildEvalContext(tc.getProjectId(), envId, null).getVariables(); }
+        catch (Exception e) { baseVars = new HashMap<>(); }
+        List<Map<String, Object>> detail = new ArrayList<>();
+        int passedCount = 0;
+        long cost = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            Map<String, Object> rowVars = new HashMap<>(baseVars);
+            for (Map.Entry<String, Object> e : rows.get(i).entrySet()) {
+                if (e.getKey() != null && !e.getKey().isEmpty()) rowVars.put("var." + e.getKey(), e.getValue());
+            }
+            EvalContext ctx = new EvalContext(rowVars, secretResolver, seqProvider, tc.getProjectId());
+            RunResult rr;
+            try { rr = executeCase(tc, ctx); }
+            catch (Exception e) { rr = errorResult(e); }
+            res.getResults().add(rr);
+            if (Boolean.TRUE.equals(rr.getPassed())) passedCount++;
+            cost += rr.getCostMs() == null ? 0 : rr.getCostMs();
+            Map<String, Object> d = new LinkedHashMap<>();
+            d.put("row", i + 1);
+            d.put("vars", rows.get(i));
+            d.put("passed", rr.getPassed());
+            d.put("httpStatus", rr.getHttpStatus());
+            d.put("costMs", rr.getCostMs());
+            d.put("error", rr.getError());
+            d.put("body", truncate(rr.getBody()));
+            d.put("assertions", rr.getAssertions());
+            detail.add(d);
+        }
+        res.setTotal(rows.size());
+        res.setPassedCount(passedCount);
+        res.setPassed(passedCount == rows.size());
+        TestRunRecord rec = new TestRunRecord();
+        rec.setProjectId(tc.getProjectId());
+        rec.setTargetType("case");
+        rec.setTargetId(id);
+        rec.setEnvId(envId);
+        rec.setPassed(res.getPassed() ? 1 : 0);
+        rec.setTotalSteps(rows.size());
+        rec.setPassedSteps(passedCount);
+        rec.setFailedSteps(rows.size() - passedCount);
+        rec.setCostMs(cost);
+        rec.setDetail(JsonUtils.toJson(detail));
+        recordMapper.insert(rec);
+        res.setRecordId(rec.getId());
+        return res;
+    }
+
+    private RunResult errorResult(Exception e) {
+        RunResult rr = new RunResult();
+        rr.setAssertions(new ArrayList<>());
+        rr.setPassed(false);
+        rr.setError(rootMessage(e));
+        return rr;
+    }
+
+    private String truncate(String s) {
+        if (s == null) return null;
+        return s.length() > 10_000 ? s.substring(0, 10_000) + "...(截断)" : s;
+    }
+
     /**
      * 执行单个用例：求值 URL/头/体 → RestTemplate 转发 → 断言求值，返回结果。
      * 不写 test_run_log，供单用例运行与场景步骤复用。
@@ -189,7 +273,7 @@ public class TestCaseService {
         for (Map<String, Object> a : parseList(tc.getAssertions())) {
             a.put("expected", eval(str(a.get("expected")), ctx));
             Map<String, Object> r = evalAssertion(a,
-                    rr.getHttpStatus() == null ? 0 : rr.getHttpStatus(), rr.getHeaders(), rr.getBody());
+                    rr.getHttpStatus() == null ? 0 : rr.getHttpStatus(), rr.getHeaders(), rr.getBody(), rr.getCostMs());
             rr.getAssertions().add(r);
             if (!Boolean.TRUE.equals(r.get("passed"))) {
                 allPassed = false;
@@ -249,7 +333,7 @@ public class TestCaseService {
     // ============ 断言求值 ============
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> evalAssertion(Map<String, Object> a, int status, Map<String, String> headers, String body) {
+    private Map<String, Object> evalAssertion(Map<String, Object> a, int status, Map<String, String> headers, String body, Long costMs) {
         String type = str(a.get("type"));
         String target = str(a.get("target"));
         String op = str(a.get("op"));
@@ -285,6 +369,30 @@ public class TestCaseService {
                     }
                     break;
                 }
+                case "latencyLt": {
+                    long c = costMs == null ? 0L : costMs;
+                    actual = c + "ms";
+                    passed = c < parseLong(expected, Long.MAX_VALUE);
+                    break;
+                }
+                case "sizeGt": {
+                    int len = body == null ? 0 : body.length();
+                    actual = len + " bytes";
+                    passed = len > parseLong(expected, Long.MAX_VALUE);
+                    break;
+                }
+                case "headerExists": {
+                    boolean exists = headers != null && headers.containsKey(target == null ? "" : target.toLowerCase());
+                    actual = exists ? "存在" : "不存在";
+                    passed = exists;
+                    break;
+                }
+                case "jsonSchema": {
+                    String msg = validateJsonSchema(body, expected);
+                    passed = (msg == null);
+                    actual = passed ? "符合" : msg;
+                    break;
+                }
                 default:
                     message = "未知断言类型: " + type;
             }
@@ -312,6 +420,41 @@ public class TestCaseService {
             return JsonPath.read(body, path);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /** JSON Schema 校验；通过返回 null，失败返回错误信息 */
+    private String validateJsonSchema(String body, String schema) {
+        if (body == null || body.isEmpty()) {
+            return "响应体为空";
+        }
+        if (schema == null || schema.trim().isEmpty()) {
+            return "未提供 Schema";
+        }
+        try {
+            com.networknt.schema.JsonSchemaFactory factory =
+                    com.networknt.schema.JsonSchemaFactory.getInstance(com.networknt.schema.SpecVersion.VersionFlag.V4);
+            com.networknt.schema.JsonSchema s = factory.getSchema(schema);
+            com.fasterxml.jackson.databind.JsonNode node = JsonUtils.mapper().readTree(body);
+            java.util.Set<com.networknt.schema.ValidationMessage> errors = s.validate(node);
+            if (errors.isEmpty()) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder();
+            for (com.networknt.schema.ValidationMessage vm : errors) {
+                sb.append(vm.getMessage()).append("; ");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "Schema 校验异常: " + rootMessage(e);
+        }
+    }
+
+    private long parseLong(String s, long def) {
+        try {
+            return Long.parseLong(str(s));
+        } catch (Exception e) {
+            return def;
         }
     }
 
@@ -487,8 +630,9 @@ public class TestCaseService {
             return m;
         }
         h.forEach((k, l) -> {
-            if (l != null && !l.isEmpty()) {
-                m.put(k, String.join(",", l));
+            if (l != null && !l.isEmpty() && k != null) {
+                // 统一小写键：header / headerExists / extract 断言均按小写查找
+                m.put(k.toLowerCase(), String.join(",", l));
             }
         });
         return m;

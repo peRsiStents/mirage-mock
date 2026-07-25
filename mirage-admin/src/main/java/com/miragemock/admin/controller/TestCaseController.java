@@ -1,5 +1,6 @@
 package com.miragemock.admin.controller;
 
+import com.miragemock.admin.dto.CaseRunResult;
 import com.miragemock.admin.dto.RunResult;
 import com.miragemock.admin.service.TestCaseService;
 import com.miragemock.common.api.Result;
@@ -59,6 +60,12 @@ public class TestCaseController {
     @PostMapping("/testcases/{id}/run")
     public Result<RunResult> run(@PathVariable Long id, @RequestParam(required = false) Long envId) {
         return Result.ok(service.run(id, envId));
+    }
+
+    /** 数据驱动运行（按 dataSet 行逐行跑，汇总结果） */
+    @PostMapping("/testcases/{id}/run-data")
+    public Result<CaseRunResult> runData(@PathVariable Long id, @RequestParam(required = false) Long envId) {
+        return Result.ok(service.runData(id, envId));
     }
 
     /** 运行历史（最近 100 条） */

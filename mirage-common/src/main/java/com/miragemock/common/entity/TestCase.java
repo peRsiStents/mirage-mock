@@ -36,6 +36,9 @@ public class TestCase extends BaseEntity {
     /** JSON: [{type,target,op,expected}] */
     private String assertions;
 
+    /** 数据驱动：JSON 数组 [{k:v,...}]，每行注入 ${var.<k>} 逐行运行；空=普通单跑 */
+    private String dataSet;
+
     /** proxy(后端转发) / direct(浏览器直发)，UI 默认模式 */
     private String mode;
 

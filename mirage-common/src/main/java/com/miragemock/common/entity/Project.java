@@ -24,4 +24,7 @@ public class Project extends BaseEntity {
 
     /** 1 启用 / 0 停用 */
     private Integer status;
+
+    /** CI headless 运行令牌（用于定时/流水线免 JWT 触发场景运行） */
+    private String ciToken;
 }

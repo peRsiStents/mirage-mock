@@ -17,6 +17,7 @@
         <el-menu-item index="/scenarios"><el-icon><Share /></el-icon><span>测试场景</span></el-menu-item>
         <el-menu-item index="/environments"><el-icon><Place /></el-icon><span>环境管理</span></el-menu-item>
         <el-menu-item index="/reports"><el-icon><DataAnalysis /></el-icon><span>测试报告</span></el-menu-item>
+        <el-menu-item index="/schedules"><el-icon><AlarmClock /></el-icon><span>定时任务</span></el-menu-item>
         <el-menu-item v-if="auth.isAdmin" index="/users"><el-icon><User /></el-icon><span>用户管理</span></el-menu-item>
       </el-menu>
     </el-aside>

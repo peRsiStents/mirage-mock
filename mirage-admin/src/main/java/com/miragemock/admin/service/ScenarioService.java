@@ -163,30 +163,70 @@ public class ScenarioService {
                 continue;
             }
             total++;
-            RunResult rr;
-            try {
-                EvalContext ctx = testCaseService.buildEvalContext(projectId, env, runtimeExtra);
-                rr = testCaseService.executeCase(tc, ctx);
-            } catch (Exception e) {
-                rr = new RunResult();
-                rr.setAssertions(new ArrayList<>());
-                rr.setPassed(false);
-                rr.setError("执行异常: " + e.getMessage());
+            List<Map<String, Object>> rows = parseList(tc == null ? null : tc.getDataSet());
+            boolean stepPassed;
+            if (tc != null && !rows.isEmpty()) {
+                // 数据驱动：按数据行逐行执行（每行注入 ${var.<k>}），步骤通过=全行通过
+                d.put("dataDriven", true);
+                List<Map<String, Object>> rowResults = new ArrayList<>();
+                Map<String, Object> stepExtracts = new LinkedHashMap<>();
+                long stepCost = 0;
+                int lastStatus = 0;
+                String lastError = null;
+                stepPassed = true;
+                for (int i = 0; i < rows.size(); i++) {
+                    Map<String, Object> rowExtra = new HashMap<>(runtimeExtra);
+                    for (Map.Entry<String, Object> en : rows.get(i).entrySet()) {
+                        if (en.getKey() != null && !en.getKey().isEmpty()) {
+                            rowExtra.put("var." + en.getKey(), en.getValue());
+                        }
+                    }
+                    RunResult rr = runOnce(tc, projectId, env, rowExtra);
+                    Map<String, Object> ex = testCaseService.extract(rr, parseList(step.getExtract()));
+                    runtimeExtra.putAll(ex);
+                    stepExtracts.putAll(ex);
+                    stepCost += rr.getCostMs() == null ? 0 : rr.getCostMs();
+                    lastStatus = rr.getHttpStatus() == null ? 0 : rr.getHttpStatus();
+                    lastError = rr.getError();
+                    if (!Boolean.TRUE.equals(rr.getPassed())) {
+                        stepPassed = false;
+                    }
+                    Map<String, Object> rd = new LinkedHashMap<>();
+                    rd.put("row", i + 1);
+                    rd.put("vars", rows.get(i));
+                    rd.put("passed", rr.getPassed());
+                    rd.put("httpStatus", rr.getHttpStatus());
+                    rd.put("costMs", rr.getCostMs());
+                    rd.put("error", rr.getError());
+                    rd.put("body", truncate(rr.getBody()));
+                    rd.put("assertions", rr.getAssertions());
+                    rowResults.add(rd);
+                }
+                d.put("rows", rowResults);
+                d.put("passed", stepPassed);
+                d.put("httpStatus", lastStatus);
+                d.put("costMs", stepCost);
+                d.put("error", stepPassed ? null : (lastError != null ? lastError : "存在失败数据行"));
+                d.put("extracts", stepExtracts);
+                d.put("skipped", false);
+            } else {
+                // 普通单次执行
+                RunResult rr = runOnce(tc, projectId, env, runtimeExtra);
+                Map<String, Object> extracts = testCaseService.extract(rr, parseList(step.getExtract()));
+                runtimeExtra.putAll(extracts);
+                stepPassed = Boolean.TRUE.equals(rr.getPassed());
+                d.put("passed", rr.getPassed());
+                d.put("httpStatus", rr.getHttpStatus());
+                d.put("costMs", rr.getCostMs());
+                d.put("error", rr.getError());
+                d.put("headers", rr.getHeaders());
+                d.put("body", truncate(rr.getBody()));
+                d.put("assertions", rr.getAssertions());
+                d.put("extracts", extracts);
+                d.put("skipped", false);
             }
-            Map<String, Object> extracts = testCaseService.extract(rr, parseList(step.getExtract()));
-            runtimeExtra.putAll(extracts);
 
-            d.put("passed", rr.getPassed());
-            d.put("httpStatus", rr.getHttpStatus());
-            d.put("costMs", rr.getCostMs());
-            d.put("error", rr.getError());
-            d.put("headers", rr.getHeaders());
-            d.put("body", truncate(rr.getBody()));
-            d.put("assertions", rr.getAssertions());
-            d.put("extracts", extracts);
-            d.put("skipped", false);
-
-            if (Boolean.TRUE.equals(rr.getPassed())) {
+            if (stepPassed) {
                 passed++;
             } else {
                 failed++;
@@ -258,6 +298,27 @@ public class ScenarioService {
     }
 
     // ============ 工具 ============
+
+    /** 执行单个用例一次（带运行时变量），失败转成 RunResult 而不抛出。 */
+    private RunResult runOnce(TestCase tc, Long projectId, Long env, Map<String, Object> extraVars) {
+        if (tc == null) {
+            RunResult rr = new RunResult();
+            rr.setAssertions(new ArrayList<>());
+            rr.setPassed(false);
+            rr.setError("用例已删除");
+            return rr;
+        }
+        try {
+            EvalContext ctx = testCaseService.buildEvalContext(projectId, env, extraVars);
+            return testCaseService.executeCase(tc, ctx);
+        } catch (Exception e) {
+            RunResult rr = new RunResult();
+            rr.setAssertions(new ArrayList<>());
+            rr.setPassed(false);
+            rr.setError("执行异常: " + e.getMessage());
+            return rr;
+        }
+    }
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> parseList(String json) {

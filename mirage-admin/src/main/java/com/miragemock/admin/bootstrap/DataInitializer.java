@@ -26,6 +26,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 /**
  * 启动数据初始化：引导管理员账号与示例项目，便于开箱即用。
  */
@@ -82,7 +84,19 @@ public class DataInitializer implements CommandLineRunner {
         if (demo != null) {
             seedTcpDemo(demo);
         }
+        ensureCiTokens();
         ruleCache.reloadAll();
+    }
+
+    /** 为缺少 ciToken 的项目生成随机令牌（CI headless 运行用） */
+    private void ensureCiTokens() {
+        List<Project> all = projectMapper.selectList(new LambdaQueryWrapper<>());
+        for (Project p : all) {
+            if (p.getCiToken() == null || p.getCiToken().isEmpty()) {
+                p.setCiToken(java.util.UUID.randomUUID().toString().replace("-", ""));
+                projectMapper.updateById(p);
+            }
+        }
     }
 
     private void seedAdmin() {

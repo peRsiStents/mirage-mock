@@ -58,5 +58,11 @@
             <artifactId>lombok</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!-- JSON Schema 断言校验（Java8 兼容的 1.0.x 线） -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>1.0.39</version>
+        </dependency>
     </dependencies>
 </project>

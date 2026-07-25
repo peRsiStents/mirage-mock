@@ -62,7 +62,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     }
 
     private boolean isPublic(String path) {
-        return path.equals("/api/v1/auth/login");
+        return path.equals("/api/v1/auth/login") || path.startsWith("/api/v1/ci/");
     }
 
     private Long parseLong(String s) {

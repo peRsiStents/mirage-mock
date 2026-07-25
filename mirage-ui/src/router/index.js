@@ -19,6 +19,7 @@ const routes = [
       { path: 'scenarios', name: 'scenarios', component: () => import('../views/Scenarios.vue') },
       { path: 'environments', name: 'environments', component: () => import('../views/Environments.vue') },
       { path: 'reports', name: 'reports', component: () => import('../views/TestReports.vue') },
+      { path: 'schedules', name: 'schedules', component: () => import('../views/Schedules.vue') },
       { path: 'users', name: 'users', component: () => import('../views/Users.vue'), meta: { admin: true } }
     ]
   }

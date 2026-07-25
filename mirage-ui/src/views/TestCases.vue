@@ -97,26 +97,38 @@
 
         <el-divider content-position="left">断言</el-divider>
         <div v-for="(a, i) in form.assertions" :key="'a'+i" class="kv-row">
-          <el-select v-model="a.type" style="width:130px">
+          <el-select v-model="a.type" style="width:150px">
             <el-option label="状态码 status" value="status" />
             <el-option label="响应体包含" value="bodyContains" />
             <el-option label="响应头 header" value="header" />
             <el-option label="JSONPath" value="jsonPath" />
+            <el-option label="耗时<ms latencyLt" value="latencyLt" />
+            <el-option label="响应大小>bytes" value="sizeGt" />
+            <el-option label="响应头存在" value="headerExists" />
+            <el-option label="JSON Schema" value="jsonSchema" />
           </el-select>
-          <el-input v-if="a.type === 'header' || a.type === 'jsonPath'" v-model="a.target" :placeholder="a.type === 'jsonPath' ? '$.data.id' : 'Header-Name'" style="width:22%" />
+          <el-input v-if="['header','jsonPath','headerExists'].includes(a.type)" v-model="a.target" :placeholder="a.type === 'jsonPath' ? '$.data.id' : 'Header-Name'" style="width:22%" />
           <el-select v-else disabled style="width:22%" />
-          <el-select v-if="a.type === 'header' || a.type === 'jsonPath'" v-model="a.op" style="width:90px">
+          <el-select v-if="['header','jsonPath'].includes(a.type)" v-model="a.op" style="width:90px">
             <el-option label="等于 eq" value="eq" /><el-option label="包含 contains" value="contains" /><el-option label="存在 exists" value="exists" v-if="a.type === 'jsonPath'" />
           </el-select>
-          <el-input v-if="a.op !== 'exists'" v-model="a.expected" placeholder="期望值" style="width:30%" />
+          <el-input v-if="a.op !== 'exists' && a.type !== 'headerExists'" v-model="a.expected" :placeholder="a.type === 'jsonSchema' ? 'JSON Schema' : (a.type === 'latencyLt' ? 'ms 阈值' : a.type === 'sizeGt' ? 'bytes 阈值' : '期望值')" style="width:30%" />
           <el-button :icon="Delete" circle size="small" type="danger" @click="form.assertions.splice(i,1)" />
         </div>
         <el-button size="small" :icon="Plus" @click="form.assertions.push({ type: 'status', target: '', op: 'eq', expected: '200' })">加断言</el-button>
+
+        <el-divider content-position="left">数据驱动（可选）</el-divider>
+        <div class="hint">
+          填写数据行（JSON 数组），每行键值注入 <span class="mono">${var.键}</span>，逐行运行用例（仅「后端转发」）。留空=普通单跑。
+          如 <span class="mono">[{"uid":10086},{"uid":10087}]</span>，URL 写 <span class="mono">/api/user/${var.uid}</span>。
+        </div>
+        <textarea v-model="form.dataSet" class="body-area" rows="4" spellcheck="false" placeholder='[{"uid":10086},{"uid":10087}]'></textarea>
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
         <el-button type="success" @click="onSend" :loading="sending">发送</el-button>
         <el-button type="primary" @click="onSave">保存</el-button>
+        <el-button type="warning" @click="onRunData" :loading="dataSending" :disabled="form.mode !== 'proxy'">数据驱动运行</el-button>
       </template>
     </el-dialog>
 
@@ -141,6 +153,27 @@
         <pre v-if="respHeaders.length" class="resp">{{ respHeaders.map(h => h.k + ': ' + h.v).join('\n') }}</pre>
         <div v-if="result.body != null" class="kv-title">响应体</div>
         <pre v-if="result.body != null" class="resp">{{ result.body }}</pre>
+      </div>
+    </el-dialog>
+
+    <!-- 数据驱动运行结果 -->
+    <el-dialog v-model="dataResultVisible" title="数据驱动运行结果" width="900px" top="3vh">
+      <div v-if="dataResult">
+        <div style="margin-bottom:8px">
+          <el-tag :type="dataResult.passed ? 'success' : 'danger'">{{ dataResult.passed ? '✓ 全部通过' : '✗ 存在失败' }}</el-tag>
+          <span class="muted" style="margin-left:8px">通过 {{ dataResult.passedCount }}/{{ dataResult.total }} 行</span>
+        </div>
+        <el-table :data="dataResultRows" size="small" border max-height="440">
+          <el-table-column prop="_row" label="行" width="56" />
+          <el-table-column label="数据行变量" width="200" show-overflow-tooltip>
+            <template #default="{ row }">{{ row._vars ? JSON.stringify(row._vars) : '' }}</template>
+          </el-table-column>
+          <el-table-column label="结果" width="56"><template #default="{ row }">{{ row.passed ? '✓' : '✗' }}</template></el-table-column>
+          <el-table-column prop="httpStatus" label="状态" width="56" />
+          <el-table-column label="耗时" width="76"><template #default="{ row }">{{ row.costMs }}ms</template></el-table-column>
+          <el-table-column prop="error" label="错误" width="120" show-overflow-tooltip />
+          <el-table-column label="响应体" show-overflow-tooltip><template #default="{ row }">{{ row.body }}</template></el-table-column>
+        </el-table>
       </div>
     </el-dialog>
 
@@ -206,7 +239,7 @@ const loading = ref(false)
 const formVisible = ref(false)
 const sending = ref(false)
 const curlText = ref('')
-const form = reactive({ id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', assertions: [], mode: 'proxy', status: 1, remark: '' })
+const form = reactive({ id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
 
 const resultVisible = ref(false)
 const result = ref(null)
@@ -217,6 +250,16 @@ const respHeaders = computed(() => {
 
 const historyVisible = ref(false)
 const history = ref([])
+
+// 数据驱动运行
+const dataResultVisible = ref(false)
+const dataResult = ref(null)
+const dataSending = ref(false)
+const dataRows = computed(() => { try { return JSON.parse(form.dataSet || '[]') } catch (e) { return [] } })
+const dataResultRows = computed(() => {
+  if (!dataResult.value || !dataResult.value.results) return []
+  return dataResult.value.results.map((r, i) => ({ ...r, _vars: dataRows.value[i], _row: i + 1 }))
+})
 
 // 变量/常量
 const variables = ref([])
@@ -236,7 +279,7 @@ async function load() {
 }
 
 function openCreate() {
-  Object.assign(form, { id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', assertions: [], mode: 'proxy', status: 1, remark: '' })
+  Object.assign(form, { id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
   curlText.value = ''
   formVisible.value = true
 }
@@ -247,6 +290,7 @@ function openEdit(row) {
   form.bodyType = row.bodyType || 'none'; form.body = row.body || ''
   form.mode = row.mode || 'proxy'; form.status = row.status == null ? 1 : row.status; form.remark = row.remark || ''
   form.headers = parseArr(row.headers); form.query = parseArr(row.query); form.assertions = parseArr(row.assertions)
+  form.dataSet = row.dataSet || ''
   curlText.value = ''
   formVisible.value = true
 }
@@ -259,7 +303,8 @@ function buildEntity() {
     bodyType: form.bodyType, body: form.body, mode: form.mode, status: form.status, remark: form.remark,
     headers: JSON.stringify(form.headers.filter((h) => h.k)),
     query: JSON.stringify(form.query.filter((q) => q.k)),
-    assertions: JSON.stringify(form.assertions)
+    assertions: JSON.stringify(form.assertions),
+    dataSet: (form.dataSet || '').trim()
   }
 }
 
@@ -310,10 +355,35 @@ async function onSend() {
 }
 
 async function onRun(row) {
-  // 从列表直接运行（按用例保存的 mode）
+  // 从列表直接运行：有数据行 → 数据驱动，否则普通运行
   openEdit(row)
   formVisible.value = false
-  await onSend()
+  if ((row.dataSet || '').trim()) {
+    await onRunData()
+  } else {
+    await onSend()
+  }
+}
+
+async function onRunData() {
+  if (!form.url) { ElMessage.warning('请填写 URL'); return }
+  let rows = []
+  if ((form.dataSet || '').trim()) {
+    try { rows = JSON.parse(form.dataSet) } catch (e) { ElMessage.error('数据行 JSON 解析失败：' + e.message); return }
+    if (!Array.isArray(rows)) { ElMessage.error('数据行必须是 JSON 数组'); return }
+  }
+  dataSending.value = true
+  try {
+    await saveSilently()
+    const res = await api.testCases.runData(form.id)
+    dataResult.value = res.data
+    dataResultVisible.value = true
+    formVisible.value = false
+  } catch (e) {
+    ElMessage.error('数据驱动运行失败：' + (e?.response?.data?.message || e.message || ''))
+  } finally {
+    dataSending.value = false
+  }
 }
 
 async function runDirect() {
