@@ -17,10 +17,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" show-overflow-tooltip />
-        <el-table-column label="操作" width="260">
+        <el-table-column label="操作" width="340">
           <template #default="{ row }">
             <el-button size="small" type="primary" link @click="useProject(row)">设为当前</el-button>
             <el-button size="small" type="primary" link @click="openMembers(row)">成员</el-button>
+            <el-button size="small" type="primary" link @click="openCi(row)">CI 接入</el-button>
             <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
             <el-button size="small" type="danger" link @click="onRemove(row)">删除</el-button>
           </template>
@@ -66,15 +67,33 @@
         </el-table-column>
       </el-table>
     </el-dialog>
+
+    <el-dialog v-model="ciVisible" title="CI / 流水线接入" width="640px">
+      <div v-if="ciProject">
+        <div class="kv-title">CI Token（免 JWT 触发场景运行）</div>
+        <el-input :model-value="ciProject.ciToken || ''" readonly>
+          <template #append>
+            <el-button :icon="CopyDocument" @click="copyText(ciProject.ciToken || '')">复制</el-button>
+          </template>
+        </el-input>
+        <div class="hint">将该 token 作为 <span class="mono">token</span> 参数传入 CI 接口，即可在流水线中触发场景运行；按返回 JSON 的 <span class="mono">data.passed</span> 判定流水线成败。</div>
+
+        <div class="kv-title" style="margin-top:14px">curl 示例</div>
+        <pre class="ci-curl">{{ curlExample }}</pre>
+        <el-button size="small" :icon="CopyDocument" @click="copyText(curlExample)">复制 curl</el-button>
+        <div class="hint" style="margin-top:8px"><span class="mono">{场景ID}</span> 替换为「测试场景」页目标场景 ID；<span class="mono">env</span> 可选（指定运行环境）。</div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, CopyDocument } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
+import { copyText } from '../utils/clipboard'
 
 const proj = useProjectStore()
 const list = ref([])
@@ -88,6 +107,19 @@ const members = ref([])
 const currentProject = ref(null)
 const newMember = reactive({ userId: null, memberRole: 'MEMBER' })
 const users = ref([])
+
+// CI 接入
+const ciVisible = ref(false)
+const ciProject = ref(null)
+const curlExample = computed(() => {
+  const origin = window.location.origin
+  const token = ciProject.value?.ciToken || '<token>'
+  return `curl -X POST "${origin}/api/v1/ci/scenarios/{场景ID}/run?token=${token}&env={环境ID,可选}"`
+})
+function openCi(row) {
+  ciProject.value = row
+  ciVisible.value = true
+}
 
 async function load() {
   loading.value = true
@@ -171,3 +203,14 @@ async function removeMember(row) {
 
 onMounted(() => { load(); loadUsers() })
 </script>
+
+<style scoped>
+.kv-title { font-size: 13px; color: #606266; margin: 8px 0 6px; }
+.hint { font-size: 12px; color: #909399; line-height: 1.7; margin-top: 6px; }
+.mono { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; }
+.ci-curl {
+  background: #f5f7fa; padding: 10px 12px; border-radius: 4px; margin: 4px 0 8px;
+  font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 12px;
+  white-space: pre-wrap; word-break: break-all; color: #303133;
+}
+</style>
