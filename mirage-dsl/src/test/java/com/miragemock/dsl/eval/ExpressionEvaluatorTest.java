@@ -5,7 +5,6 @@ import com.miragemock.dsl.func.FunctionRegistry;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -25,7 +24,8 @@ class ExpressionEvaluatorTest {
     }
 
     private EvalContext ctx() {
-        return new EvalContext(Collections.emptyMap(), null);
+        // 用可变 Map：idcard.cn 按契约会把生成的证号暂存进上下文变量，供 birthdate/gender 复用
+        return new EvalContext(new HashMap<>(), null);
     }
 
     private EvalContext ctx(Map<String, Object> vars) {

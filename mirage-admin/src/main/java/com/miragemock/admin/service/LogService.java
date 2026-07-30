@@ -164,8 +164,8 @@ public class LogService {
         return parseHttpRequest(lg);
     }
 
-    /** requestRaw 格式："METHOD /path?query\nH: V\n...\n\nbody"，分隔符 \n。 */
-    private TestCase parseHttpRequest(MockRequestLog lg) {
+    /** requestRaw 格式："METHOD /path?query\nH: V\n...\n\nbody"，分隔符 \n。包级可见以便单测。 */
+    TestCase parseHttpRequest(MockRequestLog lg) {
         TestCase tc = new TestCase();
         tc.setProjectId(lg.getProjectId());
         tc.setMode("proxy");
