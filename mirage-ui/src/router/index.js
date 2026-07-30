@@ -14,6 +14,7 @@ const routes = [
       { path: 'keys', name: 'keys', component: () => import('../views/Keys.vue') },
       { path: 'logs', name: 'logs', component: () => import('../views/Logs.vue') },
       { path: 'functions', name: 'functions', component: () => import('../views/Functions.vue') },
+      { path: 'tools', name: 'tools', component: () => import('../views/Tools.vue') },
       { path: 'file-gen', name: 'file-gen', component: () => import('../views/FileGen.vue') },
       { path: 'testcases', name: 'testcases', component: () => import('../views/TestCases.vue') },
       { path: 'scenarios', name: 'scenarios', component: () => import('../views/Scenarios.vue') },

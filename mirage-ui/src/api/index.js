@@ -50,6 +50,33 @@ export const api = {
   functions: {
     list: () => http.get('/functions')
   },
+  tools: {
+    jsonFormat: (p) => http.post('/tools/json/format', p),
+    jsonMinify: (p) => http.post('/tools/json/minify', p),
+    jsonValidate: (p) => http.post('/tools/json/validate', p),
+    jsonEscape: (p) => http.post('/tools/json/escape', p),
+    jsonUnescape: (p) => http.post('/tools/json/unescape', p),
+    xmlFormat: (p) => http.post('/tools/xml/format', p),
+    xmlMinify: (p) => http.post('/tools/xml/minify', p),
+    xmlValidate: (p) => http.post('/tools/xml/validate', p),
+    xmlEscape: (p) => http.post('/tools/xml/escape', p),
+    xmlUnescape: (p) => http.post('/tools/xml/unescape', p),
+    sqlFormat: (p) => http.post('/tools/sql/format', p),
+    sm3: (p) => http.post('/tools/sm3', p),
+    sm4Encrypt: (p) => http.post('/tools/sm4/encrypt', p),
+    sm4Decrypt: (p) => http.post('/tools/sm4/decrypt', p),
+    sm4Key: () => http.post('/tools/sm4/key'),
+    sm2Encrypt: (p) => http.post('/tools/sm2/encrypt', p),
+    sm2Decrypt: (p) => http.post('/tools/sm2/decrypt', p),
+    sm2Sign: (p) => http.post('/tools/sm2/sign', p),
+    sm2Verify: (p) => http.post('/tools/sm2/verify', p),
+    sm2Keypair: () => http.post('/tools/sm2/keypair'),
+    rsaEncrypt: (p) => http.post('/tools/rsa/encrypt', p),
+    rsaDecrypt: (p) => http.post('/tools/rsa/decrypt', p),
+    rsaSign: (p) => http.post('/tools/rsa/sign', p),
+    rsaVerify: (p) => http.post('/tools/rsa/verify', p),
+    rsaKeypair: (p) => http.post('/tools/rsa/keypair', p)
+  },
   system: {
     info: () => http.get('/system/info')
   },

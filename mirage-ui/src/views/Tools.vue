@@ -1,0 +1,346 @@
+<template>
+  <div class="page tools-page">
+    <el-card shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>工具市场 · 测试常用小工具</span>
+          <span class="hint">格式化 / 国密(RSA) 加解密签名，密钥请直接粘贴；与「函数市场」表达式同一套后端实现</span>
+        </div>
+      </template>
+
+      <el-tabs v-model="tab" type="card">
+        <!-- ===================== JSON ===================== -->
+        <el-tab-pane label="JSON" name="json">
+          <div class="bar">
+            <el-radio-group v-model="jsonIndent" size="small">
+              <el-radio-button label="2">缩进 2</el-radio-button>
+              <el-radio-button label="4">缩进 4</el-radio-button>
+              <el-radio-button label="tab">Tab</el-radio-button>
+            </el-radio-group>
+            <el-button size="small" type="primary" :loading="running" @click="doJson('format')">美化</el-button>
+            <el-button size="small" :loading="running" @click="doJson('minify')">压缩</el-button>
+            <el-button size="small" :loading="running" @click="doJson('validate')">校验</el-button>
+            <el-button size="small" :loading="running" @click="doJson('escape')">转义</el-button>
+            <el-button size="small" :loading="running" @click="doJson('unescape')">去转义</el-button>
+          </div>
+          <div class="pane">
+            <textarea v-model="jsonIn" class="io" placeholder='{"name":"蜃楼","list":[1,2,3]}'></textarea>
+            <div class="mid"><el-button circle size="small" @click="jsonIn = jsonOut; jsonOut = ''" title="输出 → 输入">⇄</el-button></div>
+            <textarea v-model="jsonOut" class="io out" readonly placeholder="结果"></textarea>
+          </div>
+        </el-tab-pane>
+
+        <!-- ===================== XML ===================== -->
+        <el-tab-pane label="XML" name="xml">
+          <div class="bar">
+            <el-radio-group v-model="xmlIndent" size="small">
+              <el-radio-button label="2">缩进 2</el-radio-button>
+              <el-radio-button label="4">缩进 4</el-radio-button>
+            </el-radio-group>
+            <el-button size="small" type="primary" :loading="running" @click="doXml('format')">美化</el-button>
+            <el-button size="small" :loading="running" @click="doXml('minify')">压缩</el-button>
+            <el-button size="small" :loading="running" @click="doXml('validate')">校验</el-button>
+            <el-button size="small" :loading="running" @click="doXml('escape')">转义</el-button>
+            <el-button size="small" :loading="running" @click="doXml('unescape')">去转义</el-button>
+          </div>
+          <div class="pane">
+            <textarea v-model="xmlIn" class="io" placeholder="粘贴 XML 文本进行美化 / 压缩 / 校验"></textarea>
+            <div class="mid"><el-button circle size="small" @click="xmlIn = xmlOut; xmlOut = ''" title="输出 → 输入">⇄</el-button></div>
+            <textarea v-model="xmlOut" class="io out" readonly placeholder="结果"></textarea>
+          </div>
+        </el-tab-pane>
+
+        <!-- ===================== SQL ===================== -->
+        <el-tab-pane label="SQL" name="sql">
+          <div class="bar">
+            <span class="muted">关键字大小写规整 + 子句换行 + AND/OR 缩进（不拆分逗号，安全）</span>
+            <el-button size="small" type="primary" :loading="running" @click="doSql">美化</el-button>
+          </div>
+          <div class="pane">
+            <textarea v-model="sqlIn" class="io" placeholder="select id,name,count(*) from t_user where status=1 and age>18 order by id"></textarea>
+            <div class="mid"><el-button circle size="small" @click="sqlIn = sqlOut; sqlOut = ''" title="输出 → 输入">⇄</el-button></div>
+            <textarea v-model="sqlOut" class="io out" readonly placeholder="结果"></textarea>
+          </div>
+        </el-tab-pane>
+
+        <!-- ===================== SM3 ===================== -->
+        <el-tab-pane label="SM3 摘要" name="sm3">
+          <div class="bar">
+            <span class="label">输出：</span>
+            <el-radio-group v-model="sm3Out" size="small">
+              <el-radio-button label="hex">Hex</el-radio-button>
+              <el-radio-button label="base64">Base64</el-radio-button>
+            </el-radio-group>
+            <el-button size="small" type="primary" :loading="running" @click="doSm3">计算摘要</el-button>
+          </div>
+          <div class="pane">
+            <textarea v-model="sm3In" class="io" placeholder="待摘要原文，如 abc（SM3 输出为 Hex 或 Base64）"></textarea>
+            <div class="mid"><el-button circle size="small" @click="sm3In = sm3Out; sm3Out = ''" title="输出 → 输入">⇄</el-button></div>
+            <textarea v-model="sm3Out" class="io out" readonly placeholder="摘要结果"></textarea>
+          </div>
+        </el-tab-pane>
+
+        <!-- ===================== SM4 ===================== -->
+        <el-tab-pane label="SM4" name="sm4">
+          <div class="cfg">
+            <div class="row">
+              <span class="label">密钥(16字节)</span>
+              <el-input v-model="sm4Key" size="small" style="width:320px" placeholder="密钥内容"></el-input>
+              <span class="label">密钥格式</span>
+              <el-select v-model="sm4KeyEnc" size="small" style="width:110px">
+                <el-option label="UTF-8" value="utf8" /><el-option label="Hex" value="hex" /><el-option label="Base64" value="base64" />
+              </el-select>
+              <el-button size="small" @click="genSm4Key">生成密钥</el-button>
+            </div>
+            <div class="row">
+              <span class="label">模式</span>
+              <el-radio-group v-model="sm4Mode" size="small">
+                <el-radio-button label="ECB">ECB</el-radio-button><el-radio-button label="CBC">CBC</el-radio-button>
+              </el-radio-group>
+              <template v-if="sm4Mode === 'CBC'">
+                <span class="label">IV</span>
+                <el-input v-model="sm4Iv" size="small" style="width:240px" placeholder="CBC 需要 IV"></el-input>
+              </template>
+              <span class="label">密文编码</span>
+              <el-radio-group v-model="sm4Enc" size="small">
+                <el-radio-button label="base64">Base64</el-radio-button><el-radio-button label="hex">Hex</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div class="row">
+              <el-button size="small" type="primary" :loading="running" @click="doSm4('encrypt')">⬆ 加密（明文→密文）</el-button>
+              <el-button size="small" :loading="running" @click="doSm4('decrypt')">⬇ 解密（密文→明文）</el-button>
+            </div>
+          </div>
+          <div class="pane">
+            <textarea v-model="sm4In" class="io" placeholder="加密填明文 / 解密填密文（按所选编码）"></textarea>
+            <div class="mid"><el-button circle size="small" @click="sm4In = sm4Out; sm4Out = ''" title="输出 → 输入">⇄</el-button></div>
+            <textarea v-model="sm4Out" class="io out" readonly placeholder="结果"></textarea>
+          </div>
+        </el-tab-pane>
+
+        <!-- ===================== SM2 ===================== -->
+        <el-tab-pane label="SM2" name="sm2">
+          <div class="cfg">
+            <div class="row">
+              <span class="label">公钥(Base64)</span>
+              <el-input v-model="sm2Pub" size="small" style="width:420px" placeholder="65 字节未压缩公钥的 Base64"></el-input>
+            </div>
+            <div class="row">
+              <span class="label">私钥(Base64)</span>
+              <el-input v-model="sm2Priv" size="small" style="width:420px" placeholder="32 字节私钥的 Base64"></el-input>
+              <span class="label">签名(Base64/Hex)</span>
+              <el-input v-model="sm2Sig" size="small" style="width:280px" placeholder="验签时填"></el-input>
+            </div>
+            <div class="row">
+              <span class="label">密文/签名编码</span>
+              <el-radio-group v-model="sm2Enc" size="small">
+                <el-radio-button label="base64">Base64</el-radio-button><el-radio-button label="hex">Hex</el-radio-button>
+              </el-radio-group>
+              <el-button size="small" @click="genSm2">生成密钥对</el-button>
+            </div>
+            <div class="row">
+              <el-button size="small" type="primary" :loading="running" @click="doSm2('encrypt')">加密(公钥)</el-button>
+              <el-button size="small" :loading="running" @click="doSm2('decrypt')">解密(私钥)</el-button>
+              <el-button size="small" :loading="running" @click="doSm2('sign')">签名(私钥)</el-button>
+              <el-button size="small" :loading="running" @click="doSm2('verify')">验签(原文+签名+公钥)</el-button>
+            </div>
+          </div>
+          <div class="pane">
+            <textarea v-model="sm2In" class="io" placeholder="加密/签名填原文；解密填密文；验签填原文（结果见下）"></textarea>
+            <div class="mid"><el-button circle size="small" @click="sm2In = sm2Out; sm2Out = ''" title="输出 → 输入">⇄</el-button></div>
+            <textarea v-model="sm2Out" class="io out" readonly placeholder="加密/解密/签名结果"></textarea>
+          </div>
+          <el-alert v-if="sm2VerifyRes !== null" :title="sm2VerifyRes ? '✅ 验签通过' : '❌ 验签失败（签名/公钥/原文不匹配）'"
+                    :type="sm2VerifyRes ? 'success' : 'error'" :closable="false" show-icon style="margin-top:10px" />
+        </el-tab-pane>
+
+        <!-- ===================== RSA ===================== -->
+        <el-tab-pane label="RSA" name="rsa">
+          <div class="cfg">
+            <div class="row">
+              <span class="label">公钥</span>
+              <el-input v-model="rsaPub" type="textarea" :rows="2" size="small" style="width:560px" placeholder="X509 Base64 或 PEM（-----BEGIN PUBLIC KEY-----）"></el-input>
+            </div>
+            <div class="row">
+              <span class="label">私钥</span>
+              <el-input v-model="rsaPriv" type="textarea" :rows="2" size="small" style="width:560px" placeholder="PKCS8 Base64 或 PEM（-----BEGIN PRIVATE KEY-----）"></el-input>
+            </div>
+            <div class="row">
+              <span class="label">签名(Base64)</span>
+              <el-input v-model="rsaSig" size="small" style="width:320px" placeholder="验签时填"></el-input>
+              <span class="label">密钥位数</span>
+              <el-select v-model="rsaBits" size="small" style="width:110px">
+                <el-option :value="1024" label="1024" /><el-option :value="2048" label="2048" /><el-option :value="4096" label="4096" />
+              </el-select>
+              <el-button size="small" @click="genRsa">生成密钥对</el-button>
+            </div>
+            <div class="row">
+              <el-button size="small" type="primary" :loading="running" @click="doRsa('encrypt')">加密(公钥)</el-button>
+              <el-button size="small" :loading="running" @click="doRsa('decrypt')">解密(私钥)</el-button>
+              <el-button size="small" :loading="running" @click="doRsa('sign')">签名(私钥)</el-button>
+              <el-button size="small" :loading="running" @click="doRsa('verify')">验签(原文+签名+公钥)</el-button>
+              <span class="muted">RSA/PKCS1 单块加密有长度上限（2048 位约 245 字节）</span>
+            </div>
+          </div>
+          <div class="pane">
+            <textarea v-model="rsaIn" class="io" placeholder="加密/签名填原文；解密填密文；验签填原文"></textarea>
+            <div class="mid"><el-button circle size="small" @click="rsaIn = rsaOut; rsaOut = ''" title="输出 → 输入">⇄</el-button></div>
+            <textarea v-model="rsaOut" class="io out" readonly placeholder="结果"></textarea>
+          </div>
+          <el-alert v-if="rsaVerifyRes !== null" :title="rsaVerifyRes ? '✅ 验签通过' : '❌ 验签失败'"
+                    :type="rsaVerifyRes ? 'success' : 'error'" :closable="false" show-icon style="margin-top:10px" />
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { api } from '../api'
+
+const tab = ref('json')
+const running = ref(false)
+
+async function exec(call, payload, onOk) {
+  running.value = true
+  try {
+    const res = await call(payload)
+    if (onOk) onOk(res.data)
+  } catch (e) {
+    /* http 拦截器已弹错误提示 */
+  } finally {
+    running.value = false
+  }
+}
+
+async function copyVal(v) {
+  if (!v) { ElMessage.warning('内容为空'); return }
+  let ok = false
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(v); ok = true }
+  } catch (e) { /* fallback */ }
+  if (!ok) {
+    const ta = document.createElement('textarea'); ta.value = v
+    ta.style.position = 'fixed'; ta.style.top = '-9999px'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.focus(); ta.select()
+    ok = document.execCommand('copy'); document.body.removeChild(ta)
+  }
+  if (ok) ElMessage.success('已复制到剪贴板'); else ElMessage.warning('复制失败，请手动选中')
+}
+
+// ---------- JSON ----------
+const jsonIn = ref('')
+const jsonOut = ref('')
+const jsonIndent = ref('2')
+function doJson(act) {
+  const map = { format: 'jsonFormat', minify: 'jsonMinify', validate: 'jsonValidate', escape: 'jsonEscape', unescape: 'jsonUnescape' }
+  exec(api.tools[map[act]], { text: jsonIn.value, indent: jsonIndent.value }, (v) => { jsonOut.value = v; ElMessage.success('完成') })
+}
+
+// ---------- XML ----------
+const xmlIn = ref('')
+const xmlOut = ref('')
+const xmlIndent = ref('2')
+function doXml(act) {
+  const map = { format: 'xmlFormat', minify: 'xmlMinify', validate: 'xmlValidate', escape: 'xmlEscape', unescape: 'xmlUnescape' }
+  exec(api.tools[map[act]], { text: xmlIn.value, indent: xmlIndent.value }, (v) => { xmlOut.value = v; ElMessage.success('完成') })
+}
+
+// ---------- SQL ----------
+const sqlIn = ref('')
+const sqlOut = ref('')
+function doSql() {
+  exec(api.tools.sqlFormat, { text: sqlIn.value }, (v) => { sqlOut.value = v; ElMessage.success('完成') })
+}
+
+// ---------- SM3 ----------
+const sm3In = ref('')
+const sm3Out = ref('')
+const sm3OutEnc = ref('hex')
+function doSm3() {
+  exec(api.tools.sm3, { text: sm3In.value, outEnc: sm3OutEnc.value }, (v) => { sm3Out.value = v; ElMessage.success('完成') })
+}
+
+// ---------- SM4 ----------
+const sm4In = ref('')
+const sm4Out = ref('')
+const sm4Key = ref('')
+const sm4Iv = ref('')
+const sm4Mode = ref('ECB')
+const sm4KeyEnc = ref('utf8')
+const sm4Enc = ref('base64')
+function doSm4(act) {
+  const p = { text: sm4In.value, key: sm4Key.value, iv: sm4Iv.value, mode: sm4Mode.value, keyEnc: sm4KeyEnc.value, outEnc: sm4Enc.value, inEnc: sm4Enc.value }
+  exec(act === 'encrypt' ? api.tools.sm4Encrypt : api.tools.sm4Decrypt, p, (v) => { sm4Out.value = v; ElMessage.success('完成') })
+}
+function genSm4Key() {
+  exec(api.tools.sm4Key, null, (v) => { sm4Key.value = v; sm4KeyEnc.value = 'hex'; ElMessage.success('已生成 128 位密钥(Hex)') })
+}
+
+// ---------- SM2 ----------
+const sm2In = ref('')
+const sm2Out = ref('')
+const sm2Pub = ref('')
+const sm2Priv = ref('')
+const sm2Sig = ref('')
+const sm2Enc = ref('base64')
+const sm2VerifyRes = ref(null)
+function doSm2(act) {
+  sm2VerifyRes.value = null
+  if (act === 'encrypt') {
+    exec(api.tools.sm2Encrypt, { text: sm2In.value, pub: sm2Pub.value, outEnc: sm2Enc.value }, (v) => { sm2Out.value = v; ElMessage.success('加密完成') })
+  } else if (act === 'decrypt') {
+    exec(api.tools.sm2Decrypt, { text: sm2In.value, priv: sm2Priv.value, inEnc: sm2Enc.value }, (v) => { sm2Out.value = v; ElMessage.success('解密完成') })
+  } else if (act === 'sign') {
+    exec(api.tools.sm2Sign, { text: sm2In.value, priv: sm2Priv.value, outEnc: sm2Enc.value }, (v) => { sm2Out.value = v; ElMessage.success('签名完成') })
+  } else if (act === 'verify') {
+    exec(api.tools.sm2Verify, { text: sm2In.value, sig: sm2Sig.value, pub: sm2Pub.value, inEnc: sm2Enc.value }, (v) => { sm2VerifyRes.value = v })
+  }
+}
+function genSm2() {
+  exec(api.tools.sm2Keypair, null, (v) => { sm2Pub.value = v.publicKey; sm2Priv.value = v.privateKey; ElMessage.success('已生成 SM2 密钥对') })
+}
+
+// ---------- RSA ----------
+const rsaIn = ref('')
+const rsaOut = ref('')
+const rsaPub = ref('')
+const rsaPriv = ref('')
+const rsaSig = ref('')
+const rsaBits = ref(2048)
+const rsaVerifyRes = ref(null)
+function doRsa(act) {
+  rsaVerifyRes.value = null
+  if (act === 'encrypt') {
+    exec(api.tools.rsaEncrypt, { text: rsaIn.value, pub: rsaPub.value }, (v) => { rsaOut.value = v; ElMessage.success('加密完成') })
+  } else if (act === 'decrypt') {
+    exec(api.tools.rsaDecrypt, { text: rsaIn.value, priv: rsaPriv.value }, (v) => { rsaOut.value = v; ElMessage.success('解密完成') })
+  } else if (act === 'sign') {
+    exec(api.tools.rsaSign, { text: rsaIn.value, priv: rsaPriv.value }, (v) => { rsaOut.value = v; ElMessage.success('签名完成') })
+  } else if (act === 'verify') {
+    exec(api.tools.rsaVerify, { text: rsaIn.value, sig: rsaSig.value, pub: rsaPub.value }, (v) => { rsaVerifyRes.value = v })
+  }
+}
+function genRsa() {
+  exec(api.tools.rsaKeypair, { bits: rsaBits.value }, (v) => { rsaPub.value = v.publicKey; rsaPriv.value = v.privateKey; ElMessage.success('已生成 RSA 密钥对') })
+}
+</script>
+
+<style scoped>
+.tools-page .card-header { display: flex; align-items: baseline; justify-content: space-between; }
+.tools-page .hint { font-size: 12px; color: #909399; }
+.bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.cfg { background: #fafbfc; border: 1px solid #ebeef5; border-radius: 4px; padding: 10px 12px; margin-bottom: 10px; }
+.cfg .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.cfg .row:last-child { margin-bottom: 0; }
+.label { font-size: 13px; color: #606266; white-space: nowrap; }
+.muted { font-size: 12px; color: #909399; }
+.pane { display: flex; align-items: stretch; gap: 6px; }
+.io { flex: 1; min-height: 220px; padding: 10px; border: 1px solid #dcdfe6; border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; resize: vertical; outline: none; }
+.io:focus { border-color: #409eff; }
+.io.out { background: #f7f9fb; }
+.mid { display: flex; align-items: center; }
+</style>
