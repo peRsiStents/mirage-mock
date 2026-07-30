@@ -23,18 +23,22 @@ import com.miragemock.dsl.eval.ExpressionEvaluator;
 import com.miragemock.dsl.spi.SecretResolver;
 import com.miragemock.dsl.spi.SeqProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.RequestEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -110,6 +114,7 @@ public class TestCaseService {
         if (patch.getQuery() != null) exists.setQuery(patch.getQuery());
         if (patch.getBodyType() != null) exists.setBodyType(patch.getBodyType());
         if (patch.getBody() != null) exists.setBody(patch.getBody());
+        if (patch.getBodyContentType() != null) exists.setBodyContentType(patch.getBodyContentType());
         if (patch.getAssertions() != null) exists.setAssertions(patch.getAssertions());
         if (patch.getMode() != null) exists.setMode(patch.getMode());
         if (patch.getStatus() != null) exists.setStatus(patch.getStatus());
@@ -238,13 +243,13 @@ public class TestCaseService {
 
         String fullUrl;
         HttpHeaders httpHeaders;
-        String body;
+        RequestBody reqBody;
         HttpMethod method;
         try {
             fullUrl = buildUrl(tc, ctx);
             validateScheme(fullUrl);
             httpHeaders = buildHeaders(tc, ctx);
-            body = useBody(tc, ctx);
+            reqBody = buildRequestBody(tc, ctx);
             method = HttpMethod.valueOf(tc.getMethod().toUpperCase());
         } catch (BizException e) {
             rr.setError(e.getMessage());
@@ -258,7 +263,10 @@ public class TestCaseService {
 
         long t0 = System.currentTimeMillis();
         try {
-            RequestEntity<String> req = new RequestEntity<>(body, httpHeaders, method, new URI(fullUrl));
+            if (reqBody.contentType != null && !httpHeaders.containsKey("Content-Type")) {
+                httpHeaders.setContentType(reqBody.contentType);
+            }
+            RequestEntity<Object> req = new RequestEntity<>(reqBody.body, httpHeaders, method, new URI(fullUrl));
             ResponseEntity<String> resp = restTemplate.exchange(req, String.class);
             rr.setHttpStatus(resp.getStatusCodeValue());
             rr.setHeaders(flatten(resp.getHeaders()));
@@ -503,23 +511,135 @@ public class TestCaseService {
                 h.add(k, v);
             }
         }
-        String bt = tc.getBodyType() == null ? "none" : tc.getBodyType().toLowerCase();
-        if (!"none".equals(bt) && tc.getBody() != null && !tc.getBody().isEmpty() && !h.containsKey("Content-Type")) {
-            if ("json".equals(bt)) {
-                h.add("Content-Type", "application/json");
-            } else if ("form".equals(bt)) {
-                h.add("Content-Type", "application/x-www-form-urlencoded");
-            }
-        }
+        // Content-Type 由 buildRequestBody 按请求体类型决定（用户已设则不覆盖）
         return h;
     }
 
-    private String useBody(TestCase tc, EvalContext ctx) {
+    /** 构建请求体：按 bodyType 返回体对象(String/byte[]/MultiValueMap)与 Content-Type；body/contentType 均空=不发体。 */
+    private RequestBody buildRequestBody(TestCase tc, EvalContext ctx) {
         String bt = tc.getBodyType() == null ? "none" : tc.getBodyType().toLowerCase();
-        if ("none".equals(bt)) {
+        String raw = tc.getBody();
+        RequestBody rb = new RequestBody();
+        if ("none".equals(bt) || raw == null) {
+            return rb;
+        }
+        switch (bt) {
+            case "form-data": {
+                LinkedMultiValueMap<String, Object> map = new LinkedMultiValueMap<>();
+                for (Map<String, Object> row : parseList(raw)) {
+                    String k = eval(str(row.get("k")), ctx);
+                    if (k.isEmpty()) {
+                        continue;
+                    }
+                    if ("file".equals(str(row.get("type"))) && row.get("dataB64") != null) {
+                        byte[] bytes = decodeBase64(str(row.get("dataB64")));
+                        if (bytes != null) {
+                            String fn = eval(str(row.get("fileName")), ctx);
+                            map.add(k, fileResource(bytes, fn.isEmpty() ? "file" : fn));
+                        }
+                    } else {
+                        map.add(k, eval(str(row.get("v")), ctx));
+                    }
+                }
+                if (!map.isEmpty()) {
+                    rb.body = map;
+                    rb.contentType = MediaType.MULTIPART_FORM_DATA;
+                }
+                break;
+            }
+            case "x-www-form-urlencoded": {
+                LinkedMultiValueMap<String, String> map = new LinkedMultiValueMap<>();
+                for (Map<String, Object> row : parseList(raw)) {
+                    String k = eval(str(row.get("k")), ctx);
+                    if (k.isEmpty()) {
+                        continue;
+                    }
+                    map.add(k, eval(str(row.get("v")), ctx));
+                }
+                if (!map.isEmpty()) {
+                    rb.body = map;
+                    rb.contentType = MediaType.APPLICATION_FORM_URLENCODED;
+                }
+                break;
+            }
+            case "binary": {
+                byte[] bytes = decodeBinaryBody(raw);
+                if (bytes != null) {
+                    rb.body = bytes;
+                    rb.contentType = parseMediaType(tc.getBodyContentType(), MediaType.APPLICATION_OCTET_STREAM);
+                }
+                break;
+            }
+            case "raw":
+                rb.body = eval(raw, ctx);
+                rb.contentType = parseMediaType(tc.getBodyContentType(), null);
+                break;
+            case "json":
+                rb.body = eval(raw, ctx);
+                rb.contentType = MediaType.APPLICATION_JSON;
+                break;
+            case "form":
+                rb.body = eval(raw, ctx);
+                rb.contentType = MediaType.APPLICATION_FORM_URLENCODED;
+                break;
+            default:
+                rb.body = eval(raw, ctx);
+                break;
+        }
+        return rb;
+    }
+
+    private static final class RequestBody {
+        Object body;
+        MediaType contentType;
+    }
+
+    private ByteArrayResource fileResource(byte[] bytes, String filename) {
+        return new ByteArrayResource(bytes) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        };
+    }
+
+    private byte[] decodeBinaryBody(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
             return null;
         }
-        return eval(tc.getBody(), ctx);
+        String s = raw.trim();
+        if (s.startsWith("{")) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> m = JsonUtils.fromJson(s, Map.class);
+                return decodeBase64(str(m.get("dataB64")));
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return decodeBase64(s);
+    }
+
+    private byte[] decodeBase64(String s) {
+        if (s == null || s.isEmpty()) {
+            return null;
+        }
+        try {
+            return Base64.getDecoder().decode(s);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private MediaType parseMediaType(String s, MediaType def) {
+        if (s == null || s.trim().isEmpty()) {
+            return def;
+        }
+        try {
+            return MediaType.parseMediaType(s.trim());
+        } catch (Exception e) {
+            return def;
+        }
     }
 
     // ============ 变量/常量（项目级） + 求值 ============

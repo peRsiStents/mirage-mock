@@ -1,7 +1,7 @@
 /**
  * 轻量 curl 命令解析：支持引号转义、-X/-H/-d/--data/--data-raw/--url 与裸 URL。
  * 覆盖 Postman/浏览器复制的常见格式；不依赖第三方库（避免解析 bug）。
- * @returns {{method, url, headers:[{k,v}], body, bodyType}}
+ * @returns {{method, url, headers:[{k,v}], body, bodyType, bodyContentType}}
  */
 export function parseCurl(text) {
   const tokens = tokenize((text || '').trim())
@@ -39,12 +39,35 @@ export function parseCurl(text) {
 
   const ct = headers.find((h) => h.k.toLowerCase() === 'content-type')
   let bodyType = 'none'
+  let bodyContentType = ''
+  let bodyOut = hasBody ? body : ''
   if (hasBody) {
-    if (ct && ct.v.includes('json')) bodyType = 'json'
-    else if (ct && ct.v.includes('x-www-form-urlencoded')) bodyType = 'form'
-    else bodyType = 'raw'
+    if (ct && ct.v.includes('json')) {
+      bodyType = 'raw'; bodyContentType = 'application/json'
+    } else if (ct && ct.v.includes('x-www-form-urlencoded')) {
+      bodyType = 'x-www-form-urlencoded'
+      bodyOut = JSON.stringify(parseUrlencoded(body))
+    } else {
+      bodyType = 'raw'
+    }
   }
-  return { method, url, headers, body: hasBody ? body : '', bodyType }
+  return { method, url, headers, body: bodyOut, bodyType, bodyContentType }
+}
+
+function parseUrlencoded(s) {
+  const rows = []
+  for (const pair of String(s || '').split('&')) {
+    if (!pair) continue
+    const idx = pair.indexOf('=')
+    const k = idx >= 0 ? pair.slice(0, idx) : pair
+    const v = idx >= 0 ? pair.slice(idx + 1) : ''
+    try {
+      rows.push({ k: decodeURIComponent(k.replace(/\+/g, ' ')), v: decodeURIComponent(v.replace(/\+/g, ' ')) })
+    } catch (e) {
+      rows.push({ k, v })
+    }
+  }
+  return rows
 }
 
 function tokenize(s) {

@@ -77,19 +77,63 @@
 
         <div class="kv-title" style="margin-top:10px">
           请求体
-          <el-select v-model="form.bodyType" size="small" style="width:110px; margin-left:8px">
-            <el-option label="无 none" value="none" /><el-option label="JSON" value="json" />
-            <el-option label="表单 form" value="form" /><el-option label="原始 raw" value="raw" />
-          </el-select>
+          <el-radio-group v-model="form.bodyType" size="small" style="margin-left:10px">
+            <el-radio-button label="none">none</el-radio-button>
+            <el-radio-button label="form-data">form-data</el-radio-button>
+            <el-radio-button label="x-www-form-urlencoded">x-www-form-urlencoded</el-radio-button>
+            <el-radio-button label="raw">raw</el-radio-button>
+            <el-radio-button label="binary">binary</el-radio-button>
+          </el-radio-group>
         </div>
-        <el-row :gutter="8" v-if="form.bodyType !== 'none'">
-          <el-col :span="17">
-            <textarea ref="bodyArea" v-model="form.body" class="body-area" rows="4" spellcheck="false" placeholder='{"key":"${var.x}"}'></textarea>
-          </el-col>
-          <el-col :span="7">
-            <div class="fn-panel"><div class="fn-title">函数市场 · 插入光标处</div><FunctionMarketSidebar :project-id="proj.id" @insert="insertBodyFn" /></div>
-          </el-col>
-        </el-row>
+
+        <!-- form-data / x-www-form-urlencoded：键值表 -->
+        <template v-if="form.bodyType === 'form-data' || form.bodyType === 'x-www-form-urlencoded'">
+          <div v-for="(r, i) in form.formRows" :key="'br'+i" class="kv-row">
+            <el-input v-model="r.k" placeholder="参数名" style="width:24%" />
+            <el-select v-if="form.bodyType === 'form-data'" v-model="r.type" style="width:90px">
+              <el-option label="文本" value="text" /><el-option label="文件" value="file" />
+            </el-select>
+            <el-input v-if="form.bodyType !== 'form-data' || r.type !== 'file'" v-model="r.v" placeholder="参数值（支持 ${var.x}）" style="flex:1" />
+            <template v-else>
+              <input type="file" class="file-input" @change="(e) => onPickFile(e, r)" />
+              <span v-if="r.fileName" class="muted file-name">{{ r.fileName }}</span>
+            </template>
+            <el-button :icon="Delete" circle size="small" type="danger" @click="form.formRows.splice(i,1)" />
+          </div>
+          <el-button size="small" :icon="Plus" @click="addFormRow">加参数</el-button>
+        </template>
+
+        <!-- raw：Content-Type + 文本 + 函数市场 -->
+        <template v-else-if="form.bodyType === 'raw'">
+          <div class="kv-row" style="margin-bottom:6px">
+            <span class="muted" style="margin-right:6px">Content-Type</span>
+            <el-select v-model="form.bodyContentType" placeholder="选择或输入" filterable allow-create style="width:260px">
+              <el-option label="application/json" value="application/json" />
+              <el-option label="text/xml" value="text/xml" />
+              <el-option label="text/plain" value="text/plain" />
+              <el-option label="text/html" value="text/html" />
+              <el-option label="application/javascript" value="application/javascript" />
+            </el-select>
+          </div>
+          <el-row :gutter="8">
+            <el-col :span="17">
+              <textarea ref="bodyArea" v-model="form.body" class="body-area" rows="4" spellcheck="false" placeholder='{"key":"${var.x}"}'></textarea>
+            </el-col>
+            <el-col :span="7">
+              <div class="fn-panel"><div class="fn-title">函数市场 · 插入光标处</div><FunctionMarketSidebar :project-id="proj.id" @insert="insertBodyFn" /></div>
+            </el-col>
+          </el-row>
+        </template>
+
+        <!-- binary：单文件原始字节 -->
+        <template v-else-if="form.bodyType === 'binary'">
+          <div class="kv-row" style="margin-bottom:6px">
+            <input type="file" class="file-input" style="flex:1" @change="onPickBinary" />
+            <el-button v-if="form.binaryFile.fileName" :icon="Delete" circle size="small" type="danger" @click="form.binaryFile = {}" />
+          </div>
+          <div v-if="form.binaryFile.fileName" class="muted">{{ form.binaryFile.fileName }} · {{ form.binaryFile.contentType || 'application/octet-stream' }} · {{ fileKb(form.binaryFile.dataB64) }}KB</div>
+          <div v-else class="hint">选择文件作为原始字节请求体（Content-Type 默认 application/octet-stream；限 2MB）。</div>
+        </template>
 
         <el-divider content-position="left">curl 导入</el-divider>
         <el-input v-model="curlText" type="textarea" :rows="2" placeholder="粘贴 curl 命令，点解析自动填充上方请求" />
@@ -239,7 +283,7 @@ const loading = ref(false)
 const formVisible = ref(false)
 const sending = ref(false)
 const curlText = ref('')
-const form = reactive({ id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
+const form = reactive({ id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
 
 const resultVisible = ref(false)
 const result = ref(null)
@@ -279,7 +323,7 @@ async function load() {
 }
 
 function openCreate() {
-  Object.assign(form, { id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
+  Object.assign(form, { id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
   curlText.value = ''
   formVisible.value = true
 }
@@ -287,7 +331,7 @@ function openCreate() {
 function openEdit(row) {
   form.id = row.id
   form.name = row.name; form.method = row.method || 'GET'; form.url = row.url || ''
-  form.bodyType = row.bodyType || 'none'; form.body = row.body || ''
+  loadBody(row)
   form.mode = row.mode || 'proxy'; form.status = row.status == null ? 1 : row.status; form.remark = row.remark || ''
   form.headers = parseArr(row.headers); form.query = parseArr(row.query); form.assertions = parseArr(row.assertions)
   form.dataSet = row.dataSet || ''
@@ -296,11 +340,115 @@ function openEdit(row) {
 }
 
 function parseArr(s) { try { return JSON.parse(s || '[]') } catch (e) { return [] } }
+function parseObj(s) { try { return JSON.parse(s || '{}') } catch (e) { return {} } }
+
+const MAX_FILE = 2 * 1024 * 1024
+
+// 按 bodyType 把后端存储反序列化到编辑态（legacy json/form 归一化为 raw）
+function loadBody(row) {
+  const bt = row.bodyType || 'none'
+  form.body = row.body || ''
+  form.bodyContentType = row.bodyContentType || ''
+  form.formRows = []
+  form.binaryFile = {}
+  if (bt === 'json') { form.bodyType = 'raw'; form.bodyContentType = 'application/json' }
+  else if (bt === 'form') { form.bodyType = 'raw'; form.bodyContentType = 'application/x-www-form-urlencoded' }
+  else { form.bodyType = bt }
+  if (form.bodyType === 'form-data' || form.bodyType === 'x-www-form-urlencoded') {
+    form.formRows = parseArr(row.body)
+  } else if (form.bodyType === 'binary') {
+    form.binaryFile = parseObj(row.body)
+  }
+}
+
+// 按编辑态序列化为后端 body 字段
+function serializeBody() {
+  if (form.bodyType === 'form-data' || form.bodyType === 'x-www-form-urlencoded') {
+    return JSON.stringify((form.formRows || []).filter((r) => r.k))
+  }
+  if (form.bodyType === 'binary') {
+    return form.binaryFile && form.binaryFile.dataB64 ? JSON.stringify(form.binaryFile) : ''
+  }
+  return form.body || ''
+}
+function serializeContentType() {
+  if (form.bodyType === 'raw') return form.bodyContentType || ''
+  if (form.bodyType === 'binary') return (form.binaryFile && form.binaryFile.contentType) || ''
+  return ''
+}
+
+function addFormRow() {
+  if (form.bodyType === 'form-data') {
+    form.formRows.push({ k: '', v: '', type: 'text', fileName: '', contentType: '', dataB64: '' })
+  } else {
+    form.formRows.push({ k: '', v: '' })
+  }
+}
+
+function readB64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => { const d = String(r.result || ''); const i = d.indexOf(','); resolve(i >= 0 ? d.slice(i + 1) : d) }
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(file)
+  })
+}
+async function onPickFile(e, row) {
+  const f = e.target.files && e.target.files[0]
+  if (!f) return
+  if (f.size > MAX_FILE) { ElMessage.warning('文件不能超过 2MB'); e.target.value = ''; return }
+  const b64 = await readB64(f)
+  row.type = 'file'; row.fileName = f.name; row.contentType = f.type || 'application/octet-stream'; row.dataB64 = b64; row.v = ''
+  e.target.value = ''
+}
+async function onPickBinary(e) {
+  const f = e.target.files && e.target.files[0]
+  if (!f) return
+  if (f.size > MAX_FILE) { ElMessage.warning('文件不能超过 2MB'); e.target.value = ''; return }
+  const b64 = await readB64(f)
+  form.binaryFile = { fileName: f.name, contentType: f.type || 'application/octet-stream', dataB64: b64 }
+  e.target.value = ''
+}
+function fileKb(b64) { if (!b64) return '0'; return String(Math.round(b64.length * 0.75 / 1024 * 10) / 10) }
+
+// 浏览器直发(direct) 按类型构造 fetch 体
+function buildDirectBody() {
+  const t = form.bodyType
+  if (t === 'none') return {}
+  if (t === 'x-www-form-urlencoded') {
+    const p = new URLSearchParams()
+    ;(form.formRows || []).forEach((r) => { if (r.k) p.append(substituteVars(r.k), substituteVars(r.v || '')) })
+    return { body: p }
+  }
+  if (t === 'form-data') {
+    const fd = new FormData()
+    ;(form.formRows || []).forEach((r) => {
+      if (!r.k) return
+      if (r.type === 'file' && r.dataB64) {
+        const bytes = Uint8Array.from(atob(r.dataB64), (c) => c.charCodeAt(0))
+        fd.append(substituteVars(r.k), new Blob([bytes], { type: r.contentType || 'application/octet-stream' }), substituteVars(r.fileName || 'file'))
+      } else {
+        fd.append(substituteVars(r.k), substituteVars(r.v || ''))
+      }
+    })
+    return { body: fd }
+  }
+  if (t === 'binary') {
+    if (form.binaryFile && form.binaryFile.dataB64) {
+      const bytes = Uint8Array.from(atob(form.binaryFile.dataB64), (c) => c.charCodeAt(0))
+      return { body: bytes, contentType: form.binaryFile.contentType || 'application/octet-stream' }
+    }
+    return {}
+  }
+  if (form.body) return { body: substituteVars(form.body), contentType: form.bodyContentType || undefined }
+  return {}
+}
 
 function buildEntity() {
   return {
     id: form.id, name: form.name, method: form.method, url: form.url,
-    bodyType: form.bodyType, body: form.body, mode: form.mode, status: form.status, remark: form.remark,
+    bodyType: form.bodyType, body: serializeBody(), bodyContentType: serializeContentType(),
+    mode: form.mode, status: form.status, remark: form.remark,
     headers: JSON.stringify(form.headers.filter((h) => h.k)),
     query: JSON.stringify(form.query.filter((q) => q.k)),
     assertions: JSON.stringify(form.assertions),
@@ -323,7 +471,10 @@ function onImportCurl() {
   if (!curlText.value.trim()) { ElMessage.warning('请粘贴 curl 命令'); return }
   try {
     const c = parseCurl(curlText.value)
-    form.method = c.method; form.url = c.url; form.headers = c.headers; form.body = c.body; form.bodyType = c.bodyType
+    form.method = c.method; form.url = c.url; form.headers = c.headers
+    form.bodyType = c.bodyType; form.body = c.body || ''; form.bodyContentType = c.bodyContentType || ''
+    form.formRows = (c.bodyType === 'form-data' || c.bodyType === 'x-www-form-urlencoded') ? parseArr(c.body) : []
+    form.binaryFile = {}
     ElMessage.success('已解析填充')
   } catch (e) { ElMessage.error('解析失败：' + e.message) }
 }
@@ -388,15 +539,19 @@ async function onRunData() {
 
 async function runDirect() {
   // 浏览器直发：仅支持 ${var.变量名} 客户端替换；DSL 函数需后端转发(proxy)
-  const rawFields = [form.url, ...(form.headers || []).map((h) => h.v), form.body]
-  if (rawFields.some((f) => /\$\{(?!var\.)/.test(f || ''))) {
+  const textFields = [form.url, ...(form.headers || []).map((h) => h.v), form.body, ...(form.formRows || []).map((r) => r.k + (r.v || ''))]
+  if (textFields.some((f) => /\$\{(?!var\.)/.test(f || ''))) {
     showResult({ error: '浏览器直发不支持 DSL 函数（如 ${uuid()}），仅支持 ${var.变量名}。请改用「后端转发」模式。', passed: false, assertions: [], mode: 'direct' })
     return
   }
   const headers = {}
   form.headers.filter((h) => h.k).forEach((h) => { headers[substituteVars(h.k)] = substituteVars(h.v) })
   const opts = { method: form.method, headers }
-  if (form.bodyType !== 'none' && form.body) opts.body = substituteVars(form.body)
+  const bd = buildDirectBody()
+  if (bd.body !== undefined && bd.body !== null) {
+    opts.body = bd.body
+    if (bd.contentType && !headers['Content-Type'] && !headers['content-type']) headers['Content-Type'] = bd.contentType
+  }
   const t0 = Date.now()
   try {
     const resp = await fetch(substituteVars(buildUrl(form)), opts)
@@ -516,6 +671,8 @@ onMounted(() => { load(); loadVariables() })
 .muted { color: #909399; font-size: 12px; }
 .kv-title { font-size: 13px; color: #606266; margin: 8px 0 4px; display: flex; align-items: center; }
 .kv-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.file-input { font-size: 12px; flex: 1; }
+.file-name { margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .hint { font-size: 12px; color: #909399; margin: 4px 0 8px; line-height: 1.7; }
 .fn-panel { border: 1px solid #ebeef5; border-radius: 4px; padding: 8px; }
 .fn-title { font-size: 12px; color: #606266; margin-bottom: 6px; }

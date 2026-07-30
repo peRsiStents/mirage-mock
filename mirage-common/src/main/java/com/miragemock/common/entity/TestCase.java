@@ -28,10 +28,16 @@ public class TestCase extends BaseEntity {
     /** JSON: [{k,v}] URL 查询参数 */
     private String query;
 
-    /** none / json / form / raw */
+    /**
+     * 请求体类型：none / form-data / x-www-form-urlencoded / raw / binary（旧值 json/form/raw 后端兼容）。
+     * body 语义随类型变化：raw=原始文本；x-www/form-data=JSON 行数组；binary=JSON{fileName,contentType,dataB64}。
+     */
     private String bodyType;
 
     private String body;
+
+    /** raw / binary 的显式 Content-Type（如 application/json、application/octet-stream）；结构化类型忽略。 */
+    private String bodyContentType;
 
     /** JSON: [{type,target,op,expected}] */
     private String assertions;
