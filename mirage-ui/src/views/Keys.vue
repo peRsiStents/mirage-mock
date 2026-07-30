@@ -39,15 +39,15 @@
         <el-form-item label="别名"><el-input v-model="form.alias" /></el-form-item>
         <el-form-item label="算法">
           <el-select v-model="form.algorithm">
-            <el-option label="SM2" value="SM2" />
-            <el-option label="SM4" value="SM4" />
-            <el-option label="AES" value="AES" />
-            <el-option label="RSA" value="RSA" />
+            <el-option label="SM2（非对称）" value="SM2" />
+            <el-option label="SM4（对称）" value="SM4" />
+            <el-option label="AES（对称）" value="AES" />
+            <el-option label="RSA（非对称）" value="RSA" />
           </el-select>
         </el-form-item>
-        <el-form-item label="公钥(Base64)"><el-input v-model="form.publicKey" type="textarea" :rows="2" /></el-form-item>
-        <el-form-item label="私钥(Base64)"><el-input v-model="form.privateKey" type="textarea" :rows="2" /></el-form-item>
-        <el-form-item label="IV(Base64)"><el-input v-model="form.ivValue" /></el-form-item>
+        <el-form-item v-if="isAsym" label="公钥(Base64)"><el-input v-model="form.publicKey" type="textarea" :rows="2" placeholder="X509/Base64" /></el-form-item>
+        <el-form-item :label="isAsym ? '私钥(Base64)' : '密钥(Base64)'"><el-input v-model="form.privateKey" type="textarea" :rows="2" :placeholder="isAsym ? 'PKCS8/Base64 或 SM2 裸字节' : '16 字节(AES/SM4)'" /></el-form-item>
+        <el-form-item v-if="!isAsym" label="IV(Base64)"><el-input v-model="form.ivValue" placeholder="CBC 模式才需要" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
@@ -67,7 +67,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
@@ -80,6 +80,7 @@ const sm2Alias = ref('')
 
 const formVisible = ref(false)
 const form = reactive({ alias: '', algorithm: 'SM4', publicKey: '', privateKey: '', ivValue: '' })
+const isAsym = computed(() => form.algorithm === 'SM2' || form.algorithm === 'RSA')
 
 const resultVisible = ref(false)
 const result = reactive({ alias: '', publicKey: '', privateKey: '' })

@@ -59,21 +59,41 @@
         </el-row>
         <el-form-item label="报文格式">
           <el-select v-model="form.messageFormat">
-            <el-option v-for="f in ['json','key_value','fixed_fields','hex_string']" :key="f" :label="f" :value="f" />
+            <el-option label="JSON" value="json" />
+            <el-option label="键值对 key_value" value="key_value" />
+            <el-option label="定长字段 fixed_fields" value="fixed_fields" />
+            <el-option label="Hex 字符串 hex_string" value="hex_string" />
           </el-select>
         </el-form-item>
         <el-form-item label="帧切分配置">
-          <el-input v-model="form.frameConfig" type="textarea" :rows="2" class="mono" placeholder='{"type":"length_field","lenBytes":4,"endian":"big","initialStrip":4}' />
+          <div class="cfg-block">
+            <div class="cfg-bar">
+              <el-select v-model="framePresetType" placeholder="选类型加载示例" style="width: 220px" @change="applyFramePreset">
+                <el-option label="长度头 length_field" value="length_field" />
+                <el-option label="分隔符 delimiter" value="delimiter" />
+                <el-option label="定长 fixed" value="fixed" />
+                <el-option label="读到关闭 close_end" value="close_end" />
+              </el-select>
+              <el-button size="small" link @click="formatCfg('frameConfig')">格式化</el-button>
+            </div>
+            <el-input v-model="form.frameConfig" type="textarea" :rows="2" class="mono" placeholder='{"type":"length_field","lenBytes":4,"offset":0,"adjustment":0,"initialStrip":4}' />
+          </div>
         </el-form-item>
         <el-form-item label="格式专属配置">
-          <el-input v-model="form.messageFormatConfig" type="textarea" :rows="2" class="mono" placeholder='fixed_fields: {"fields":[{"name":"orgNo","len":10}]}  /  key_value: {"pairSep":"&","kvSep":"="}' />
+          <div class="cfg-block">
+            <div class="cfg-bar"><el-button size="small" link @click="loadMsgFmtExample">加载示例（按报文格式）</el-button></div>
+            <el-input v-model="form.messageFormatConfig" type="textarea" :rows="2" class="mono" placeholder='定长字段: {"fields":[{"name":"orgNo","len":10}]}   键值对: {"pairSep":"&","kvSep":"="}' />
+          </div>
         </el-form-item>
         <el-row :gutter="12">
           <el-col :span="12"><el-form-item label="路由提取"><el-input v-model="form.routeExtract" placeholder="$.transCode / field:orgNo / kv:type" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="流水号提取"><el-input v-model="form.serialExtract" placeholder="$.serialNo" /></el-form-item></el-col>
         </el-row>
         <el-form-item label="主动推送配置">
-          <el-input v-model="form.pushConfig" type="textarea" :rows="3" class="mono" placeholder='{"onConnect":[{"template":{"msg":"welcome"},"delayMs":500}],"schedule":[{"template":{"msg":"hb"},"cron":"*/30 * * * * *","target":"all"}]}' />
+          <div class="cfg-block">
+            <div class="cfg-bar"><el-button size="small" link @click="loadPushExample">加载示例</el-button></div>
+            <el-input v-model="form.pushConfig" type="textarea" :rows="3" class="mono" placeholder='{"onConnect":[{"template":{"msg":"welcome"},"delayMs":500}],"schedule":[{"template":{"msg":"hb"},"cron":"*/30 * * * * *","target":"all"}]}' />
+          </div>
         </el-form-item>
         <el-form-item label="启用"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" /></el-form-item>
       </el-form>
@@ -98,6 +118,32 @@ const loading = ref(false)
 const running = ref({})
 const visible = ref(false)
 const form = reactive(emptyForm())
+
+// 帧切分预设（与后端 FrameDecoderFactory 的 schema 对齐）
+const framePresets = {
+  length_field: '{"type":"length_field","lenBytes":4,"offset":0,"adjustment":0,"initialStrip":4}',
+  delimiter: '{"type":"delimiter","value":"\\n"}',
+  fixed: '{"type":"fixed","length":64}',
+  close_end: '{"type":"close_end"}'
+}
+const framePresetType = ref('')
+const cfgLabel = { frameConfig: '帧切分配置', messageFormatConfig: '格式专属配置', pushConfig: '主动推送配置' }
+
+function applyFramePreset(t) { if (t && framePresets[t]) form.frameConfig = framePresets[t] }
+function loadMsgFmtExample() {
+  if (form.messageFormat === 'fixed_fields') form.messageFormatConfig = '{"fields":[{"name":"orgNo","len":10},{"name":"amount","len":12}]}'
+  else if (form.messageFormat === 'key_value') form.messageFormatConfig = '{"pairSep":"&","kvSep":"="}'
+  else { form.messageFormatConfig = ''; ElMessage.info('该报文格式无需专属配置') }
+}
+function loadPushExample() {
+  form.pushConfig = '{"onConnect":[{"template":{"msg":"welcome"},"delayMs":500}],"schedule":[{"template":{"msg":"heartbeat"},"cron":"*/30 * * * * *","target":"all"}]}'
+}
+function formatCfg(key) {
+  const s = form[key]
+  if (!s || !s.trim()) return
+  try { form[key] = JSON.stringify(JSON.parse(s), null, 2) } catch (e) { ElMessage.error('当前内容不是合法 JSON') }
+}
+function isJson(s) { if (!s || !s.trim()) return true; try { JSON.parse(s); return true } catch (e) { return false } }
 
 function emptyForm() {
   return { id: null, name: '', port: 9001, connMode: 'LONG', matchMode: 'ASYNC', messageFormat: 'json',
@@ -127,6 +173,9 @@ function openCreate() { Object.assign(form, emptyForm()); visible.value = true }
 function openEdit(row) { Object.assign(form, row); visible.value = true }
 
 async function onSave() {
+  for (const f of ['frameConfig', 'messageFormatConfig', 'pushConfig']) {
+    if (!isJson(form[f])) { ElMessage.error((cfgLabel[f] || f) + ' 不是合法 JSON，请检查'); return }
+  }
   const payload = { ...form }
   if (form.id) await api.listeners.update(form.id, payload)
   else await api.listeners.create(proj.id, payload)
@@ -151,4 +200,6 @@ onMounted(load)
 
 <style scoped>
 .mono { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 12px; }
+.cfg-block { width: 100%; }
+.cfg-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 </style>
