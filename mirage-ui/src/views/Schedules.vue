@@ -51,6 +51,33 @@
       </el-form>
       <template #footer><el-button @click="formVisible = false">取消</el-button><el-button type="primary" @click="onSave">保存</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="resultVisible" title="运行结果" width="860px" top="3vh">
+      <div v-if="result">
+        <div style="margin-bottom:8px">
+          <el-tag :type="result.passed ? 'success' : 'danger'">{{ result.passed ? '✓ 通过' : '✗ 失败' }}</el-tag>
+          <span class="muted"> 通过 {{ result.passedSteps }}/{{ result.totalSteps }}，耗时 {{ result.costMs }}ms</span>
+        </div>
+        <div v-for="(s, i) in result.steps" :key="i" class="step-result">
+          <div>
+            <el-tag size="small" :type="s.skipped ? 'info' : (s.passed ? 'success' : 'danger')">{{ s.skipped ? '跳过' : (s.passed ? '✓' : '✗') }}</el-tag>
+            <b style="margin:0 6px">{{ i + 1 }}. {{ s.caseName }}</b>
+            <span class="muted">HTTP {{ s.httpStatus }} · {{ s.costMs }}ms</span>
+            <span v-if="s.error" class="err">{{ s.error }}</span>
+          </div>
+          <el-collapse v-if="!s.skipped">
+            <el-collapse-item title="断言 / 提取 / 响应">
+              <div v-if="s.assertions && s.assertions.length" class="sub">断言：</div>
+              <div v-for="(a, k) in s.assertions" :key="k" class="line">{{ a.passed ? '✓' : '✗' }} {{ a.type }} {{ a.target }} 期望 {{ a.expected }} | 实际 {{ a.actual }}</div>
+              <div v-if="s.extracts && Object.keys(s.extracts).length" class="sub">提取：</div>
+              <div v-for="(v, key) in s.extracts" :key="key" class="line">{{ key }} = {{ short(v) }}</div>
+              <div v-if="s.body" class="sub">响应体：</div>
+              <ResponseBody v-if="s.body" :body="s.body" />
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -60,6 +87,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
+import ResponseBody from '../components/ResponseBody.vue'
 
 const proj = useProjectStore()
 const list = ref([])
@@ -68,6 +96,10 @@ const scenarios = ref([])
 const envs = ref([])
 const formVisible = ref(false)
 const form = reactive({ id: null, name: '', scenarioId: null, cron: '0 */5 * * * ?', envId: null, enabled: 1, remark: '' })
+const resultVisible = ref(false)
+const result = ref(null)
+
+function short(v) { const s = String(v); return s.length > 80 ? s.slice(0, 80) + '…' : s }
 
 function scenarioName(id) { const s = scenarios.value.find(x => x.id === id); return s ? s.name : '—' }
 
@@ -90,10 +122,27 @@ async function onSave() {
 }
 
 async function onToggle(row) { await api.schedules.toggle(row.id); load() }
-async function onRun(row) { try { const r = await api.schedules.run(row.id); ElMessage.success(r.data.passed ? '✓ 通过' : '✗ 失败') } catch (e) { ElMessage.error('运行失败') }; load() }
+async function onRun(row) {
+  try {
+    const r = await api.schedules.run(row.id)
+    result.value = r.data
+    resultVisible.value = true
+    ElMessage.success(r.data.passed ? '✓ 通过' : '✗ 存在失败')
+  } catch (e) {
+    ElMessage.error('运行失败')
+  }
+  load()
+}
 async function onRemove(row) { await ElMessageBox.confirm(`删除定时「${row.name}」？`, '警告', { type: 'warning' }); await api.schedules.remove(row.id); ElMessage.success('已删除'); load() }
 
 watch(() => proj.id, load)
 onMounted(load)
 </script>
-<style scoped>.card-header { display: flex; align-items: center; justify-content: space-between; }</style>
+<style scoped>
+.card-header { display: flex; align-items: center; justify-content: space-between; }
+.muted { color: #909399; font-size: 12px; }
+.err { color: #f56c6c; margin-left: 8px; font-size: 12px; }
+.step-result { border-bottom: 1px solid #f0f0f0; padding: 8px 0; }
+.line { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 12px; margin: 2px 0; }
+.sub { font-size: 12px; color: #606266; margin-top: 6px; }
+</style>

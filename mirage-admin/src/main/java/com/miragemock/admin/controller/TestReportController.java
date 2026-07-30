@@ -27,9 +27,10 @@ public class TestReportController {
     public Result<PageResult<TestRunRecord>> records(@PathVariable Long pid,
                                                      @RequestParam(required = false) String type,
                                                      @RequestParam(required = false) Long targetId,
+                                                     @RequestParam(required = false) Integer passed,
                                                      @RequestParam(defaultValue = "1") long page,
                                                      @RequestParam(defaultValue = "20") long size) {
-        return Result.ok(service.records(pid, type, targetId, page, size));
+        return Result.ok(service.records(pid, type, targetId, passed, page, size));
     }
 
     @GetMapping("/records/{id}")

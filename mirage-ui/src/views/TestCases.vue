@@ -6,12 +6,13 @@
         <div class="card-header">
           <span>测试用例 <el-tag size="small">{{ proj.name }}</el-tag></span>
           <div>
+            <el-input v-model="keyword" placeholder="搜索 名称/方法/URL" clearable size="small" style="width:220px;margin-right:8px" />
             <el-button @click="openVariables">变量/常量</el-button>
             <el-button type="primary" :icon="Plus" @click="openCreate">新建用例</el-button>
           </div>
         </div>
       </template>
-      <el-table :data="list" v-loading="loading" border stripe>
+      <el-table :data="filtered" v-loading="loading" border stripe>
         <template #empty>
           <el-empty description="暂无用例">
             <el-button type="primary" size="small" @click="openCreate">新建用例</el-button>
@@ -210,7 +211,7 @@
         <div v-if="respHeaders.length" class="kv-title">响应头</div>
         <pre v-if="respHeaders.length" class="resp">{{ respHeaders.map(h => h.k + ': ' + h.v).join('\n') }}</pre>
         <div v-if="result.body != null" class="kv-title">响应体</div>
-        <pre v-if="result.body != null" class="resp">{{ result.body }}</pre>
+        <ResponseBody v-if="result.body != null" :body="result.body" />
       </div>
     </el-dialog>
 
@@ -290,11 +291,18 @@ import { useTestCaseDraftStore } from '../store/testcaseDraft'
 import { parseCurl } from '../utils/curl'
 import { copyText } from '../utils/clipboard'
 import FunctionMarketSidebar from '../components/FunctionMarketSidebar.vue'
+import ResponseBody from '../components/ResponseBody.vue'
 
 const proj = useProjectStore()
 const draftStore = useTestCaseDraftStore()
 const list = ref([])
 const loading = ref(false)
+const keyword = ref('')
+const filtered = computed(() => {
+  const k = keyword.value.trim().toLowerCase()
+  if (!k) return list.value
+  return list.value.filter((t) => ((t.name || '') + ' ' + (t.method || '') + ' ' + (t.url || '')).toLowerCase().includes(k))
+})
 
 const formVisible = ref(false)
 const sending = ref(false)

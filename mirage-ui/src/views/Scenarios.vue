@@ -5,10 +5,11 @@
       <template #header>
         <div class="card-header">
           <span>测试场景 <el-tag size="small">{{ proj.name }}</el-tag></span>
+          <el-input v-model="keyword" placeholder="搜索 名称/备注" clearable size="small" style="width:200px;margin-right:8px" />
           <el-button type="primary" :icon="Plus" @click="openCreate">新建场景</el-button>
         </div>
       </template>
-      <el-table :data="list" v-loading="loading" border stripe>
+      <el-table :data="filtered" v-loading="loading" border stripe>
         <template #empty>
           <el-empty description="暂无场景">
             <el-button type="primary" size="small" @click="openCreate">新建场景</el-button>
@@ -115,7 +116,7 @@
               <div v-if="s.extracts && Object.keys(s.extracts).length" class="sub">提取：</div>
               <div v-for="(v, key) in s.extracts" :key="key" class="line">{{ key }} = {{ short(v) }}</div>
               <div v-if="s.body" class="sub">响应体：</div>
-              <pre v-if="s.body" class="resp">{{ s.body }}</pre>
+              <ResponseBody v-if="s.body" :body="s.body" />
             </el-collapse-item>
           </el-collapse>
         </div>
@@ -125,15 +126,22 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Top, Bottom } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
+import ResponseBody from '../components/ResponseBody.vue'
 
 const proj = useProjectStore()
 const list = ref([])
 const loading = ref(false)
+const keyword = ref('')
+const filtered = computed(() => {
+  const k = keyword.value.trim().toLowerCase()
+  if (!k) return list.value
+  return list.value.filter((s) => ((s.name || '') + ' ' + (s.remark || '')).toLowerCase().includes(k))
+})
 const envs = ref([])
 const cases = ref([])
 

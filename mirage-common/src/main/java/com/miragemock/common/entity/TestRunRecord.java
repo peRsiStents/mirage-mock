@@ -1,5 +1,6 @@
 package com.miragemock.common.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -18,6 +19,10 @@ public class TestRunRecord extends BaseEntity {
     private String targetType;
 
     private Long targetId;
+
+    /** 展示用：场景名 / 用例名（不入库，列表回填） */
+    @TableField(exist = false)
+    private String targetName;
 
     private Long envId;
 

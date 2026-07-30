@@ -5,8 +5,19 @@
       <template #header>
         <div class="card-header"><span>测试报告 <el-tag size="small">{{ proj.name }}</el-tag></span></div>
       </template>
+      <div class="filters">
+        <el-select v-model="filters.type" placeholder="类型" clearable style="width:120px" @change="resetAndLoad">
+          <el-option label="场景" value="scenario" /><el-option label="用例" value="case" />
+        </el-select>
+        <el-select v-model="filters.passed" placeholder="结果" clearable style="width:120px" @change="resetAndLoad">
+          <el-option label="通过" :value="1" /><el-option label="失败" :value="0" />
+        </el-select>
+      </div>
       <el-table :data="list" v-loading="loading" border stripe>
         <el-table-column prop="createTime" label="时间" width="170" />
+        <el-table-column label="名称" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.targetName || (row.targetId ? '#' + row.targetId : '—') }}</template>
+        </el-table-column>
         <el-table-column label="类型" width="90">
           <template #default="{ row }">{{ row.targetType === 'scenario' ? '场景' : '用例' }}</template>
         </el-table-column>
@@ -45,7 +56,7 @@
           <div v-if="s.extracts && Object.keys(s.extracts).length" class="sub">提取</div>
           <div v-for="(v, key) in s.extracts" :key="key" class="line">{{ key }} = {{ short(v) }}</div>
           <div v-if="s.body" class="sub">响应体</div>
-          <pre v-if="s.body" class="resp">{{ s.body }}</pre>
+          <ResponseBody v-if="s.body" :body="s.body" />
         </div>
       </div>
     </el-dialog>
@@ -56,19 +67,26 @@
 import { ref, reactive, onMounted, watch } from 'vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
+import ResponseBody from '../components/ResponseBody.vue'
 
 const proj = useProjectStore()
 const list = ref([])
 const loading = ref(false)
 const page = reactive({ current: 1, size: 20, total: 0 })
+const filters = reactive({ type: '', passed: null })
 const detailVisible = ref(false)
 const detail = ref(null)
+
+function resetAndLoad() { page.current = 1; load() }
 
 async function load() {
   if (!proj.id) return
   loading.value = true
   try {
-    const res = await api.records.query(proj.id, { page: page.current, size: page.size })
+    const params = { page: page.current, size: page.size }
+    if (filters.type) params.type = filters.type
+    if (filters.passed !== null && filters.passed !== '') params.passed = filters.passed
+    const res = await api.records.query(proj.id, params)
     list.value = res.data.list || []
     page.total = res.data.total || 0
   } finally { loading.value = false }
@@ -89,6 +107,7 @@ onMounted(load)
 
 <style scoped>
 .card-header { display: flex; align-items: center; justify-content: space-between; }
+.filters { display: flex; gap: 8px; margin-bottom: 12px; }
 .muted { color: #909399; font-size: 12px; }
 .err { color: #f56c6c; margin-left: 8px; font-size: 12px; }
 .step-result { border-bottom: 1px solid #f0f0f0; padding: 8px 0; }

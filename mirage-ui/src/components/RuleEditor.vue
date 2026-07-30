@@ -9,12 +9,12 @@
 
       <el-divider content-position="left">匹配条件（AND，空为兜底）</el-divider>
       <div v-for="(c, i) in conditions" :key="i" class="cond-row">
-        <el-select v-model="c.source" style="width: 110px">
-          <el-option v-for="s in sources" :key="s" :label="s" :value="s" />
+        <el-select v-model="c.source" style="width: 140px">
+          <el-option v-for="s in sources" :key="s.v" :label="s.l" :value="s.v" />
         </el-select>
-        <el-input v-model="c.key" placeholder="header名 / $.jsonPath / path变量 / 字段名" style="width: 260px" />
-        <el-select v-model="c.op" style="width: 110px">
-          <el-option v-for="o in ops" :key="o" :label="o" :value="o" />
+        <el-input v-model="c.key" :placeholder="keyPlaceholder(c.source)" style="width: 240px" />
+        <el-select v-model="c.op" style="width: 150px">
+          <el-option v-for="o in ops" :key="o.v" :label="o.l" :value="o.v" />
         </el-select>
         <el-input v-model="c.valueText" placeholder="值（in 用逗号分隔）" style="width: 220px" />
         <el-button :icon="Delete" circle type="danger" @click="conditions.splice(i, 1)" />
@@ -102,8 +102,40 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'saved'])
 
-const sources = ['header', 'query', 'body', 'path', 'form', 'field']
-const ops = ['eq', 'ne', 'in', 'gt', 'gte', 'lt', 'lte', 'regex', 'contains', 'exists', 'not_exists']
+const sources = [
+  { v: 'header', l: '请求头 header' },
+  { v: 'query', l: '查询参数 query' },
+  { v: 'body', l: '请求体 body' },
+  { v: 'path', l: '路径变量 path' },
+  { v: 'form', l: '表单 form' },
+  { v: 'field', l: '报文字段 field' }
+]
+const ops = [
+  { v: 'eq', l: '等于 eq' },
+  { v: 'ne', l: '不等于 ne' },
+  { v: 'contains', l: '包含 contains' },
+  { v: 'exists', l: '存在 exists' },
+  { v: 'not_exists', l: '不存在 not_exists' },
+  { v: 'in', l: '属于 in' },
+  { v: 'gt', l: '大于 gt' },
+  { v: 'gte', l: '大于等于 gte' },
+  { v: 'lt', l: '小于 lt' },
+  { v: 'lte', l: '小于等于 lte' },
+  { v: 'regex', l: '正则 regex' }
+]
+
+// 按 source 给 key 输入框动态占位符，降低新手困惑
+function keyPlaceholder(source) {
+  switch (source) {
+    case 'header': return 'Header 名，如 X-Token'
+    case 'query': return '参数名，如 page'
+    case 'path': return '路径变量名，如 userId'
+    case 'field': return '报文字段名，如 serialNo'
+    case 'body': return '请求体字段名'
+    case 'form': return '表单字段名'
+    default: return '键名'
+  }
+}
 
 const form = ref({ name: '', priority: 100, status: 1, delayType: 'NONE', delayMs: 0, delayMinMs: 0, delayMaxMs: 0, faultType: 'NONE' })
 const conditions = ref([])

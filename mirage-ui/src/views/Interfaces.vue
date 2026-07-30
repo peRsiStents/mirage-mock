@@ -6,10 +6,11 @@
         <template #header>
           <div class="card-header">
             <span>接口管理 <el-tag size="small">{{ proj.name }}</el-tag></span>
+            <el-input v-model="keyword" placeholder="搜索 名称/方法/路径" clearable size="small" style="width:200px;margin-right:8px" />
             <el-button type="primary" :icon="Plus" @click="openCreateInterface">新建接口</el-button>
           </div>
         </template>
-        <el-table :data="interfaces" v-loading="loading" border stripe highlight-current-row @current-change="onSelectInterface" size="small">
+        <el-table :data="filtered" v-loading="loading" border stripe highlight-current-row @current-change="onSelectInterface" size="small">
           <template #empty>
             <el-empty description="暂无接口">
               <el-button type="primary" size="small" @click="openCreateInterface">新建接口</el-button>
@@ -141,6 +142,12 @@ import RuleEditor from '../components/RuleEditor.vue'
 const proj = useProjectStore()
 const interfaces = ref([])
 const loading = ref(false)
+const keyword = ref('')
+const filtered = computed(() => {
+  const k = keyword.value.trim().toLowerCase()
+  if (!k) return interfaces.value
+  return interfaces.value.filter((it) => ((it.name || '') + ' ' + (it.httpMethod || '') + ' ' + (it.httpPath || '')).toLowerCase().includes(k))
+})
 const currentInterface = ref(null)
 const rules = ref([])
 const listeners = ref([])

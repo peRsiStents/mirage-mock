@@ -26,9 +26,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 测试场景编排：有序步骤链路，步骤间变量提取与传递，失败即停(可配继续)，结果落 test_run_record。
@@ -265,7 +267,7 @@ public class ScenarioService {
 
     // ============ 报告 ============
 
-    public PageResult<TestRunRecord> records(Long projectId, String type, Long targetId, long page, long size) {
+    public PageResult<TestRunRecord> records(Long projectId, String type, Long targetId, Integer passed, long page, long size) {
         if (page < 1) page = 1;
         if (size < 1 || size > 200) size = 20;
         LambdaQueryWrapper<TestRunRecord> w = new LambdaQueryWrapper<TestRunRecord>()
@@ -273,8 +275,48 @@ public class ScenarioService {
                 .orderByDesc(TestRunRecord::getCreateTime);
         if (type != null && !type.isEmpty()) w.eq(TestRunRecord::getTargetType, type);
         if (targetId != null) w.eq(TestRunRecord::getTargetId, targetId);
+        if (passed != null) w.eq(TestRunRecord::getPassed, passed);
         Page<TestRunRecord> p = recordMapper.selectPage(new Page<>(page, size), w);
+        enrichTargetNames(p.getRecords());
         return PageResult.of(p.getRecords(), p.getTotal(), page, size);
+    }
+
+    /** 回填每条记录对应的场景名 / 用例名，供报告列表「名称」列展示。 */
+    private void enrichTargetNames(List<TestRunRecord> recs) {
+        if (recs == null || recs.isEmpty()) {
+            return;
+        }
+        Set<Long> scIds = new HashSet<>();
+        Set<Long> caseIds = new HashSet<>();
+        for (TestRunRecord r : recs) {
+            if (r.getTargetId() == null) {
+                continue;
+            }
+            if ("scenario".equals(r.getTargetType())) {
+                scIds.add(r.getTargetId());
+            } else {
+                caseIds.add(r.getTargetId());
+            }
+        }
+        Map<Long, String> scNames = new HashMap<>();
+        if (!scIds.isEmpty()) {
+            for (TestScenario s : scenarioMapper.selectBatchIds(scIds)) {
+                if (s.getId() != null) {
+                    scNames.put(s.getId(), s.getName());
+                }
+            }
+        }
+        Map<Long, String> caseNames = new HashMap<>();
+        if (!caseIds.isEmpty()) {
+            for (TestCase c : caseMapper.selectBatchIds(caseIds)) {
+                if (c.getId() != null) {
+                    caseNames.put(c.getId(), c.getName());
+                }
+            }
+        }
+        for (TestRunRecord r : recs) {
+            r.setTargetName("scenario".equals(r.getTargetType()) ? scNames.get(r.getTargetId()) : caseNames.get(r.getTargetId()));
+        }
     }
 
     public TestRunRecord record(Long id) {
