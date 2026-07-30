@@ -272,11 +272,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
+import { useTestCaseDraftStore } from '../store/testcaseDraft'
 import { parseCurl } from '../utils/curl'
 import { copyText } from '../utils/clipboard'
 import FunctionMarketSidebar from '../components/FunctionMarketSidebar.vue'
 
 const proj = useProjectStore()
+const draftStore = useTestCaseDraftStore()
 const list = ref([])
 const loading = ref(false)
 
@@ -662,7 +664,15 @@ async function onRemove(row) {
 }
 
 watch(() => proj.id, () => { load(); loadVariables() })
-onMounted(() => { load(); loadVariables() })
+onMounted(() => {
+  load()
+  loadVariables()
+  // 来自「请求日志 → 生成用例」的草稿：取出并打开新建弹窗（id 为空即新建）
+  const draft = draftStore.take()
+  if (draft) {
+    openEdit(draft)
+  }
+})
 </script>
 
 <style scoped>

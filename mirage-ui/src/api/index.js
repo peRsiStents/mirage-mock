@@ -42,7 +42,8 @@ export const api = {
     generateSm2: (pid, alias) => http.post(`/projects/${pid}/keys/sm2/generate`, null, { params: { alias } })
   },
   logs: {
-    query: (pid, params) => http.get(`/projects/${pid}/logs`, { params })
+    query: (pid, params) => http.get(`/projects/${pid}/logs`, { params }),
+    toTestCase: (pid, logId) => http.post(`/projects/${pid}/logs/${logId}/testcase`)
   },
   template: {
     evaluate: (payload) => http.post('/template/evaluate', payload)

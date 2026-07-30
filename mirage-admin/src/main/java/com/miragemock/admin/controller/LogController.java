@@ -4,9 +4,11 @@ import com.miragemock.admin.service.LogService;
 import com.miragemock.common.api.PageResult;
 import com.miragemock.common.api.Result;
 import com.miragemock.common.entity.MockRequestLog;
+import com.miragemock.common.entity.TestCase;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,5 +34,11 @@ public class LogController {
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "20") long size) {
         return Result.ok(logService.query(pid, interfaceId, matched, from, to, page, size));
+    }
+
+    /** 将一条请求日志解析为「未保存」的测试用例草稿（前端打开编辑、复核后再保存）。 */
+    @PostMapping("/{logId}/testcase")
+    public Result<TestCase> toTestCase(@PathVariable Long pid, @PathVariable Long logId) {
+        return Result.ok(logService.buildTestCaseDraft(pid, logId));
     }
 }

@@ -35,8 +35,11 @@
           <template #default="{ row }">{{ row.ruleName || (row.ruleId ? '#' + row.ruleId : '—') }}</template>
         </el-table-column>
         <el-table-column prop="costMs" label="耗时ms" width="90" />
-        <el-table-column label="操作" width="90">
-          <template #default="{ row }"><el-button size="small" link @click="showDetail(row)">详情</el-button></template>
+        <el-table-column label="操作" width="150">
+          <template #default="{ row }">
+            <el-button size="small" link @click="showDetail(row)">详情</el-button>
+            <el-button v-if="row.protocol === 'HTTP'" size="small" link type="primary" @click="toCase(row)">生成用例</el-button>
+          </template>
         </el-table-column>
       </el-table>
       <el-pagination
@@ -62,10 +65,15 @@
 
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
+import { useTestCaseDraftStore } from '../store/testcaseDraft'
 
+const router = useRouter()
 const proj = useProjectStore()
+const draftStore = useTestCaseDraftStore()
 const logs = ref([])
 const loading = ref(false)
 const filters = reactive({ interfaceId: '', matched: null, from: null, to: null })
@@ -112,6 +120,17 @@ async function load() {
 function showDetail(row) {
   detail.value = row
   detailVisible.value = true
+}
+
+async function toCase(row) {
+  try {
+    const res = await api.logs.toTestCase(proj.id, row.id)
+    draftStore.set(res.data)
+    ElMessage.success('已生成用例草稿，前往编辑')
+    router.push('/testcases')
+  } catch (e) {
+    /* 拦截器已提示 */
+  }
 }
 
 watch(() => proj.id, () => { load(); loadInterfaces() })
