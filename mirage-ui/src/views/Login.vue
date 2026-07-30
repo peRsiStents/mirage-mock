@@ -9,12 +9,13 @@
       <el-divider class="sep" />
       <el-form :model="form" label-position="top" @submit.prevent="onLogin" autocomplete="off">
         <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="请输入用户名" autocomplete="off" name="mirage-user" />
+          <el-input v-model="form.username" placeholder="请输入用户名" autocomplete="off" name="mirage-user" @keyup.enter="onLogin" @input="loginError = ''" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" autocomplete="new-password" name="mirage-pwd" @keyup.enter="onLogin" />
+          <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" autocomplete="new-password" name="mirage-pwd" @keyup.enter="onLogin" @input="loginError = ''" />
         </el-form-item>
         <el-button type="primary" :loading="loading" class="login-btn" @click="onLogin">登录</el-button>
+        <el-alert v-if="loginError" :title="loginError" type="error" show-icon :closable="false" style="margin-top: 12px" />
       </el-form>
     </el-card>
   </div>
@@ -31,18 +32,20 @@ const router = useRouter()
 const auth = useAuthStore()
 const form = reactive({ username: '', password: '' })
 const loading = ref(false)
+const loginError = ref('')
 
 async function onLogin() {
   if (!form.username || !form.password) {
-    ElMessage.warning('请输入用户名和密码')
+    loginError.value = '请输入用户名和密码'
     return
   }
+  loginError.value = ''
   loading.value = true
   try {
     await auth.login(form.username, form.password)
     router.push('/')
   } catch (e) {
-    // 错误已由拦截器提示
+    loginError.value = e?.response?.data?.message || e?.message || '登录失败，请重试'
   } finally {
     loading.value = false
   }

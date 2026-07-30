@@ -12,6 +12,11 @@
         </div>
       </template>
       <el-table :data="list" v-loading="loading" border stripe>
+        <template #empty>
+          <el-empty description="暂无用例">
+            <el-button type="primary" size="small" @click="openCreate">新建用例</el-button>
+          </el-empty>
+        </template>
         <el-table-column prop="name" label="名称" width="160" />
         <el-table-column label="请求" show-overflow-tooltip>
           <template #default="{ row }"><el-tag size="small" :type="mTag(row.method)">{{ row.method }}</el-tag> <span class="mono">{{ row.url }}</span></template>

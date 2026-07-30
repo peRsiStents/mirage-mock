@@ -3,8 +3,11 @@
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span>工具市场 · 测试常用小工具</span>
-          <span class="hint">格式化 / 国密(RSA) 加解密签名，密钥请直接粘贴；与「函数市场」表达式同一套后端实现</span>
+          <div>
+            <span>工具市场 · 测试常用小工具</span>
+            <span class="hint">格式化 / 国密(RSA) 加解密签名，密钥请直接粘贴；与「函数市场」表达式同一套后端实现</span>
+          </div>
+          <el-button size="small" @click="copyCurrentOut">复制结果</el-button>
         </div>
       </template>
 
@@ -316,6 +319,13 @@ async function copyVal(v) {
     ok = document.execCommand('copy'); document.body.removeChild(ta)
   }
   if (ok) ElMessage.success('已复制到剪贴板'); else ElMessage.warning('复制失败，请手动选中')
+}
+
+// 按当前 tab 复制对应输出框内容
+function copyCurrentOut() {
+  const m = { json: jsonOut, xml: xmlOut, sql: sqlOut, sm3: sm3Out, sm4: sm4Out, sm2: sm2Out, rsa: rsaOut, enc: encOut }
+  const r = m[tab.value]
+  copyVal(r ? r.value : '')
 }
 
 // ---------- JSON ----------

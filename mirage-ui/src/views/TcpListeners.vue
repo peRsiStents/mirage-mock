@@ -9,6 +9,11 @@
         </div>
       </template>
       <el-table :data="list" v-loading="loading" border stripe>
+        <template #empty>
+          <el-empty description="暂无监听器">
+            <el-button type="primary" size="small" @click="openCreate">新建监听器</el-button>
+          </el-empty>
+        </template>
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="port" label="端口" width="80" />
         <el-table-column prop="connMode" label="连接" width="80" />

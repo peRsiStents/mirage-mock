@@ -15,6 +15,11 @@
         </div>
       </template>
       <el-table :data="list" v-loading="loading" border stripe>
+        <template #empty>
+          <el-empty description="暂无密钥">
+            <el-button type="primary" size="small" @click="openCreate">录入密钥</el-button>
+          </el-empty>
+        </template>
         <el-table-column prop="alias" label="别名" width="160" />
         <el-table-column prop="algorithm" label="算法" width="100" />
         <el-table-column label="公钥" show-overflow-tooltip>

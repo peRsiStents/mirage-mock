@@ -10,6 +10,11 @@
           </div>
         </template>
         <el-table :data="interfaces" v-loading="loading" border stripe highlight-current-row @current-change="onSelectInterface" size="small">
+          <template #empty>
+            <el-empty description="暂无接口">
+              <el-button type="primary" size="small" @click="openCreateInterface">新建接口</el-button>
+            </el-empty>
+          </template>
           <el-table-column prop="name" label="名称" />
           <el-table-column label="协议" width="80">
             <template #default="{ row }"><el-tag :type="row.protocol === 'HTTP' ? 'primary' : 'warning'" size="small">{{ row.protocol }}</el-tag></template>
@@ -51,6 +56,11 @@
           </div>
         </template>
         <el-table :data="rules" border size="small">
+          <template #empty>
+            <el-empty description="暂无规则" :image-size="60">
+              <el-button type="primary" size="small" @click="openCreateRule">新建规则</el-button>
+            </el-empty>
+          </template>
           <el-table-column prop="priority" label="优先级" width="80" />
           <el-table-column prop="name" label="规则名" />
           <el-table-column label="匹配条件" show-overflow-tooltip>
@@ -234,7 +244,7 @@ async function saveInterface() {
   } else {
     await api.interfaces.create(proj.id, { ...ifaceForm })
   }
-  ElMessage.success('已保存')
+  ElMessage.success('已保存并即时生效')
   ifaceVisible.value = false
   loadInterfaces()
 }

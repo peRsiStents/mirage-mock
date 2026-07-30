@@ -9,6 +9,11 @@
         </div>
       </template>
       <el-table :data="list" v-loading="loading" border stripe>
+        <template #empty>
+          <el-empty description="暂无环境">
+            <el-button type="primary" size="small" @click="openCreate">新建环境</el-button>
+          </el-empty>
+        </template>
         <el-table-column prop="name" label="名称" width="140" />
         <el-table-column prop="baseUrl" label="Base URL" show-overflow-tooltip />
         <el-table-column label="变量数" width="80">

@@ -23,7 +23,8 @@ const routes = [
       { path: 'schedules', name: 'schedules', component: () => import('../views/Schedules.vue') },
       { path: 'users', name: 'users', component: () => import('../views/Users.vue'), meta: { admin: true } }
     ]
-  }
+  },
+  { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
 
 const router = createRouter({

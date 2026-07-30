@@ -79,16 +79,41 @@ function snippetFor(f, alias) {
   return '${' + f.name + "(${field.xxx}, '" + alias + "')}"
 }
 
+// 从函数 example 取首个 ${...} 片段（带示例参数），避免插入光秃秃的 ${fn}（如 ${int}）导致运行报错
+function firstSnippet(f) {
+  const alt = (f.example || '').split(' / ')[0].trim()
+  const start = alt.indexOf('${')
+  if (start < 0) {
+    return '${' + f.name + '}'
+  }
+  let depth = 0
+  for (let i = start + 2; i < alt.length; i++) {
+    if (alt[i] === '{') {
+      depth++
+    } else if (alt[i] === '}') {
+      if (depth === 0) {
+        return alt.slice(start, i + 1)
+      }
+      depth--
+    }
+  }
+  return alt
+}
+
 function onPick(f) {
   if (f.category === '加解密签名') {
     pickCrypto(f)
   } else {
-    emit('insert', '${' + f.name + '}')
+    emit('insert', firstSnippet(f))
   }
 }
 
 function copyFn(f) {
-  copyText('${' + f.name + '}')
+  if (f.category === '加解密签名') {
+    copyText(snippetFor(f, 'key_alias'))
+  } else {
+    copyText(firstSnippet(f))
+  }
 }
 
 function pickCrypto(f) {

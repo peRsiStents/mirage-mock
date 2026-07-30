@@ -210,13 +210,19 @@ function buildPayload() {
 }
 
 async function onSave() {
-  const payload = buildPayload()
+  let payload
+  try {
+    payload = buildPayload()
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败：请检查响应模板是否为合法 JSON')
+    return
+  }
   if (props.rule && props.rule.id) {
     await api.rules.update(props.rule.id, payload)
   } else {
     await api.rules.create(props.interfaceId, payload)
   }
-  ElMessage.success('已保存')
+  ElMessage.success('已保存并即时生效')
   emit('update:modelValue', false)
   emit('saved')
 }
