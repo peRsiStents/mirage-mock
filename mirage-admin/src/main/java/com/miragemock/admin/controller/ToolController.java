@@ -104,6 +104,68 @@ public class ToolController {
         return run(() -> svc.sqlFormat(g(b, "text")));
     }
 
+    // ===================== 编码 / 摘要 / 转换 =====================
+
+    @PostMapping("/base64/encode")
+    public Result<String> base64Encode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.base64Encode(g(b, "text")));
+    }
+
+    @PostMapping("/base64/decode")
+    public Result<String> base64Decode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.base64Decode(g(b, "text")));
+    }
+
+    @PostMapping("/hex/encode")
+    public Result<String> hexEncode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.hexEncode(g(b, "text")));
+    }
+
+    @PostMapping("/hex/decode")
+    public Result<String> hexDecode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.hexDecode(g(b, "text")));
+    }
+
+    @PostMapping("/url/encode")
+    public Result<String> urlEncode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.urlEncode(g(b, "text")));
+    }
+
+    @PostMapping("/url/decode")
+    public Result<String> urlDecode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.urlDecode(g(b, "text")));
+    }
+
+    @PostMapping("/hash")
+    public Result<String> hash(@RequestBody Map<String, String> b) {
+        return run(() -> svc.hash(g(b, "text"), g(b, "algo")));
+    }
+
+    @PostMapping("/jwt/decode")
+    public Result<Map<String, String>> jwtDecode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.jwtDecode(g(b, "text")));
+    }
+
+    @PostMapping("/timestamp/now")
+    public Result<Map<String, Object>> timestampNow() {
+        return run(svc::tsNow);
+    }
+
+    @PostMapping("/timestamp/to-epoch")
+    public Result<Map<String, Object>> timestampToEpoch(@RequestBody Map<String, String> b) {
+        return run(() -> svc.tsToEpoch(g(b, "text")));
+    }
+
+    @PostMapping("/timestamp/from-epoch")
+    public Result<Map<String, Object>> timestampFromEpoch(@RequestBody Map<String, String> b) {
+        return run(() -> svc.tsFromEpoch(g(b, "text")));
+    }
+
+    @PostMapping("/uuid")
+    public Result<String> uuid(@RequestBody Map<String, String> b) {
+        return run(() -> svc.uuid(parseInt(g(b, "count"), 1)));
+    }
+
     // ===================== SM3 =====================
 
     @PostMapping("/sm3")

@@ -63,6 +63,94 @@
           </div>
         </el-tab-pane>
 
+        <!-- ===================== 编码 / 转换 ===================== -->
+        <el-tab-pane label="编码/转换" name="enc">
+          <div class="bar">
+            <el-radio-group v-model="encMode" size="small">
+              <el-radio-button label="base64">Base64</el-radio-button>
+              <el-radio-button label="hex">Hex</el-radio-button>
+              <el-radio-button label="url">URL</el-radio-button>
+              <el-radio-button label="hash">哈希</el-radio-button>
+              <el-radio-button label="jwt">JWT 解析</el-radio-button>
+              <el-radio-button label="ts">时间戳</el-radio-button>
+              <el-radio-button label="uuid">UUID</el-radio-button>
+            </el-radio-group>
+          </div>
+
+          <!-- Base64 / Hex / URL -->
+          <template v-if="encMode === 'base64' || encMode === 'hex' || encMode === 'url'">
+            <div class="bar">
+              <el-button size="small" type="primary" :loading="running" @click="enc2way('encode')">编码</el-button>
+              <el-button size="small" :loading="running" @click="enc2way('decode')">解码</el-button>
+            </div>
+            <div class="pane">
+              <textarea v-model="encIn" class="io" placeholder="输入待编码/解码文本"></textarea>
+              <div class="mid"><el-button circle size="small" @click="encIn = encOut; encOut = ''" title="输出 → 输入">⇄</el-button></div>
+              <textarea v-model="encOut" class="io out" readonly placeholder="结果"></textarea>
+            </div>
+          </template>
+
+          <!-- 哈希 -->
+          <template v-else-if="encMode === 'hash'">
+            <div class="bar">
+              <el-radio-group v-model="hashAlgo" size="small">
+                <el-radio-button label="MD5">MD5</el-radio-button>
+                <el-radio-button label="SHA1">SHA1</el-radio-button>
+                <el-radio-button label="SHA256">SHA256</el-radio-button>
+                <el-radio-button label="SHA512">SHA512</el-radio-button>
+              </el-radio-group>
+              <el-button size="small" type="primary" :loading="running" @click="doHash">计算摘要</el-button>
+            </div>
+            <div class="pane">
+              <textarea v-model="encIn" class="io" placeholder="输入原文，输出 Hex 摘要"></textarea>
+              <div class="mid"><el-button circle size="small" @click="encIn = encOut; encOut = ''" title="输出 → 输入">⇄</el-button></div>
+              <textarea v-model="encOut" class="io out" readonly placeholder="摘要结果（Hex）"></textarea>
+            </div>
+          </template>
+
+          <!-- JWT 解析 -->
+          <template v-else-if="encMode === 'jwt'">
+            <div class="bar">
+              <el-button size="small" type="primary" :loading="running" @click="doJwt">解析（仅解码，不验签）</el-button>
+            </div>
+            <div class="pane">
+              <textarea v-model="encIn" class="io" placeholder="粘贴 JWT：eyJhbGciOi...header.payload.signature"></textarea>
+              <div class="mid"><el-button circle size="small" @click="encIn = encOut; encOut = ''" title="输出 → 输入">⇄</el-button></div>
+              <textarea v-model="encOut" class="io out" readonly placeholder="Header / Payload / Signature"></textarea>
+            </div>
+          </template>
+
+          <!-- 时间戳 -->
+          <template v-else-if="encMode === 'ts'">
+            <div class="bar">
+              <el-button size="small" @click="doTsNow">当前时间</el-button>
+              <el-button size="small" type="primary" :loading="running" @click="doTsToEpoch">日期 → 时间戳</el-button>
+              <el-button size="small" type="primary" :loading="running" @click="doTsFromEpoch">时间戳 → 日期</el-button>
+            </div>
+            <div class="pane">
+              <textarea v-model="encIn" class="io" placeholder="日期：2026-07-30 12:00:00   或   时间戳：1753905600 / 1753905600000（自动识别秒/毫秒）"></textarea>
+              <div class="mid"><el-button circle size="small" @click="encIn = encOut; encOut = ''" title="输出 → 输入">⇄</el-button></div>
+              <textarea v-model="encOut" class="io out" readonly placeholder="秒 / 毫秒 / ISO / 本地时间"></textarea>
+            </div>
+          </template>
+
+          <!-- UUID -->
+          <template v-else-if="encMode === 'uuid'">
+            <div class="bar">
+              <span class="label">数量</span>
+              <el-input-number v-model="uuidCount" :min="1" :max="100" size="small" />
+              <el-radio-group v-model="uuidUpper" size="small">
+                <el-radio-button :label="false">小写</el-radio-button>
+                <el-radio-button :label="true">大写</el-radio-button>
+              </el-radio-group>
+              <el-button size="small" type="primary" :loading="running" @click="doUuid">生成</el-button>
+            </div>
+            <div class="pane">
+              <textarea v-model="encOut" class="io out" readonly placeholder="生成的 UUID 列表（每行一个）"></textarea>
+            </div>
+          </template>
+        </el-tab-pane>
+
         <!-- ===================== SM3 ===================== -->
         <el-tab-pane label="SM3 摘要" name="sm3">
           <div class="bar">
@@ -253,6 +341,46 @@ const sqlIn = ref('')
 const sqlOut = ref('')
 function doSql() {
   exec(api.tools.sqlFormat, { text: sqlIn.value }, (v) => { sqlOut.value = v; ElMessage.success('完成') })
+}
+
+// ---------- 编码 / 转换 ----------
+const encMode = ref('base64')
+const encIn = ref('')
+const encOut = ref('')
+const hashAlgo = ref('MD5')
+const uuidCount = ref(1)
+const uuidUpper = ref(false)
+const TWO_WAY = { base64: ['b64Encode', 'b64Decode'], hex: ['hexEncode', 'hexDecode'], url: ['urlEncode', 'urlDecode'] }
+function enc2way(dir) {
+  const apiName = TWO_WAY[encMode.value][dir === 'encode' ? 0 : 1]
+  exec(api.tools[apiName], { text: encIn.value }, (v) => { encOut.value = v; ElMessage.success('完成') })
+}
+function doHash() {
+  exec(api.tools.hash, { text: encIn.value, algo: hashAlgo.value }, (v) => { encOut.value = v; ElMessage.success('完成') })
+}
+function doJwt() {
+  exec(api.tools.jwtDecode, { text: encIn.value }, (v) => {
+    encOut.value = '【Header】\n' + v.header + '\n\n【Payload】\n' + v.payload + '\n\n【Signature】\n' + v.signature
+    ElMessage.success('已解析')
+  })
+}
+function formatTs(v) {
+  return '秒  : ' + v.seconds + '\n毫秒: ' + v.millis + '\nISO : ' + v.iso + '\n本地: ' + v.local
+}
+function doTsNow() {
+  exec(api.tools.tsNow, null, (v) => { encOut.value = formatTs(v); ElMessage.success('当前时间') })
+}
+function doTsToEpoch() {
+  exec(api.tools.tsToEpoch, { text: encIn.value }, (v) => { encOut.value = formatTs(v); ElMessage.success('完成') })
+}
+function doTsFromEpoch() {
+  exec(api.tools.tsFromEpoch, { text: encIn.value }, (v) => { encOut.value = formatTs(v); ElMessage.success('完成') })
+}
+function doUuid() {
+  exec(api.tools.uuid, { count: uuidCount.value }, (v) => {
+    encOut.value = uuidUpper.value ? v.toUpperCase() : v
+    ElMessage.success('已生成 ' + uuidCount.value + ' 个')
+  })
 }
 
 // ---------- SM3 ----------

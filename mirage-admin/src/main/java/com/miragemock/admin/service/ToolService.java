@@ -23,14 +23,24 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -386,6 +396,188 @@ public class ToolService {
             return Codec.base64Decode(s);
         } catch (Exception e) {
             throw new IllegalArgumentException("RSA " + role + "应为 Base64 或 PEM：" + e.getMessage());
+        }
+    }
+
+    // ===================== 编码 / 摘要 / 转换 =====================
+
+    public String base64Encode(String text) {
+        return Codec.base64(Codec.utf8(nullToEmpty(text)));
+    }
+
+    public String base64Decode(String text) {
+        requireNonEmpty(text);
+        try {
+            return Codec.utf8(Codec.base64Decode(text.trim()));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Base64 解码失败：" + rootMessage(e));
+        }
+    }
+
+    public String hexEncode(String text) {
+        return Codec.hex(Codec.utf8(nullToEmpty(text)));
+    }
+
+    public String hexDecode(String text) {
+        requireNonEmpty(text);
+        try {
+            return Codec.utf8(Codec.hexDecode(text.trim()));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Hex 解码失败：" + rootMessage(e));
+        }
+    }
+
+    public String urlEncode(String text) {
+        try {
+            return URLEncoder.encode(nullToEmpty(text), "UTF-8");
+        } catch (Exception e) {
+            throw new IllegalStateException("URL 编码失败：" + rootMessage(e), e);
+        }
+    }
+
+    public String urlDecode(String text) {
+        requireNonEmpty(text);
+        try {
+            return URLDecoder.decode(text.trim(), "UTF-8");
+        } catch (Exception e) {
+            throw new IllegalArgumentException("URL 解码失败：" + rootMessage(e));
+        }
+    }
+
+    public String hash(String text, String algo) {
+        String a = algo == null ? "MD5" : algo.toUpperCase(Locale.ROOT);
+        String jce;
+        switch (a) {
+            case "MD5": jce = "MD5"; break;
+            case "SHA1": jce = "SHA-1"; break;
+            case "SHA256": jce = "SHA-256"; break;
+            case "SHA512": jce = "SHA-512"; break;
+            default: throw new IllegalArgumentException("不支持的算法：" + a + "（支持 MD5/SHA1/SHA256/SHA512）");
+        }
+        try {
+            MessageDigest md = MessageDigest.getInstance(jce);
+            return Codec.hex(md.digest(Codec.utf8(nullToEmpty(text))));
+        } catch (Exception e) {
+            throw new IllegalStateException("摘要计算失败：" + rootMessage(e), e);
+        }
+    }
+
+    /** 解析 JWT（不验签）：header / payload 以美化 JSON 返回，signature 原样。 */
+    public Map<String, String> jwtDecode(String token) {
+        String t = token == null ? "" : token.trim();
+        if (t.isEmpty()) {
+            throw new IllegalArgumentException("JWT 不能为空");
+        }
+        String[] parts = t.split("\\.");
+        if (parts.length < 2) {
+            throw new IllegalArgumentException("JWT 格式错误：应以 header.payload.signature 结构、用 . 分隔");
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        out.put("header", prettyJson(b64UrlDecode(parts[0])));
+        out.put("payload", prettyJson(b64UrlDecode(parts[1])));
+        out.put("signature", parts.length >= 3 ? parts[2] : "(无签名)");
+        return out;
+    }
+
+    private String b64UrlDecode(String s) {
+        String p = s;
+        switch (s.length() % 4) {
+            case 2: p = s + "=="; break;
+            case 3: p = s + "="; break;
+            default: break;
+        }
+        try {
+            return Codec.utf8(Base64.getUrlDecoder().decode(p));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Base64Url 解码失败：" + rootMessage(e));
+        }
+    }
+
+    private String prettyJson(String json) {
+        try {
+            return JSON.writerWithDefaultPrettyPrinter().writeValueAsString(JSON.readTree(json));
+        } catch (Exception e) {
+            return json;
+        }
+    }
+
+    // ---------- 时间戳 ----------
+
+    public Map<String, Object> tsNow() {
+        return tsMap(Instant.now());
+    }
+
+    public Map<String, Object> tsToEpoch(String datetime) {
+        return tsMap(parseDateTime(datetime).atZone(ZoneId.systemDefault()).toInstant());
+    }
+
+    public Map<String, Object> tsFromEpoch(String value) {
+        long v = parseEpoch(value);
+        // 不足 13 位（< 1e12）视为秒，否则视为毫秒
+        long ms = v < 1_000_000_000_000L ? v * 1000L : v;
+        return tsMap(Instant.ofEpochMilli(ms));
+    }
+
+    private Map<String, Object> tsMap(Instant inst) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("seconds", inst.getEpochSecond());
+        m.put("millis", inst.toEpochMilli());
+        m.put("iso", inst.toString());
+        m.put("local", LocalDateTime.ofInstant(inst, ZoneId.systemDefault()).withNano(0).toString().replace('T', ' '));
+        return m;
+    }
+
+    private long parseEpoch(String value) {
+        String s = value == null ? "" : value.trim().replaceAll("[^0-9-]", "");
+        if (s.isEmpty()) {
+            throw new IllegalArgumentException("无法解析为时间戳数字：" + value);
+        }
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("无法解析为时间戳数字：" + value);
+        }
+    }
+
+    private LocalDateTime parseDateTime(String text) {
+        String s = text == null ? "" : text.trim();
+        if (s.isEmpty()) {
+            throw new IllegalArgumentException("日期不能为空");
+        }
+        Exception last = null;
+        try {
+            return LocalDateTime.parse(s, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        } catch (Exception e) { last = e; }
+        try {
+            return LocalDateTime.parse(s, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+        } catch (Exception e) { last = e; }
+        try {
+            return LocalDateTime.parse(s, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        } catch (Exception e) { last = e; }
+        try {
+            return LocalDate.parse(s).atStartOfDay();
+        } catch (Exception e) { last = e; }
+        throw new IllegalArgumentException("无法解析日期，支持 yyyy-MM-dd HH:mm:ss / ISO：" + (last == null ? "" : rootMessage(last)));
+    }
+
+    // ---------- UUID ----------
+
+    public String uuid(int count) {
+        int n = count <= 0 ? 1 : Math.min(count, 100);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            sb.append(UUID.randomUUID()).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    private String nullToEmpty(String s) {
+        return s == null ? "" : s;
+    }
+
+    private void requireNonEmpty(String s) {
+        if (s == null || s.trim().isEmpty()) {
+            throw new IllegalArgumentException("输入不能为空");
         }
     }
 
