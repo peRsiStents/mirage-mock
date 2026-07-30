@@ -368,12 +368,28 @@ public class TestCaseService {
                 }
                 case "jsonPath": {
                     Object val = readJsonPath(body, target);
-                    if ("exists".equals(op)) {
-                        actual = val == null ? "(无)" : str(val);
-                        passed = val != null;
-                    } else {
-                        actual = val == null ? "" : str(val);
-                        passed = "contains".equals(op) ? actual.contains(expected) : actual.equals(expected);
+                    String display = jsonValueStr(val);
+                    actual = display;
+                    switch (op) {
+                        case "exists":
+                            actual = val == null ? "(无)" : display;
+                            passed = val != null;
+                            break;
+                        case "contains":
+                            passed = display.contains(expected);
+                            break;
+                        case "ne":
+                            passed = !jsonSmartEquals(val, display, expected);
+                            break;
+                        case "gt":
+                        case "lt":
+                        case "ge":
+                        case "le":
+                            passed = jsonCompareNum(val, expected, op);
+                            break;
+                        default: // eq
+                            passed = jsonSmartEquals(val, display, expected);
+                            break;
                     }
                     break;
                 }
@@ -426,6 +442,59 @@ public class TestCaseService {
         }
         try {
             return JsonPath.read(body, path);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** jsonPath 取值转展示串：标量直转，对象/数组紧凑 JSON，null→""（便于 contains/eq 字符串比较）。 */
+    private String jsonValueStr(Object val) {
+        if (val == null) {
+            return "";
+        }
+        if (val instanceof Number || val instanceof Boolean || val instanceof String) {
+            return String.valueOf(val);
+        }
+        try {
+            return JsonUtils.toJson(val);
+        } catch (Exception e) {
+            return String.valueOf(val);
+        }
+    }
+
+    /** 相等：两边均可解析为数字时按数值比（5 == 5.0），否则按字符串比。 */
+    private boolean jsonSmartEquals(Object val, String display, String expected) {
+        Double a = toDouble(val);
+        Double b = toDouble(expected);
+        if (a != null && b != null) {
+            return Math.abs(a - b) < 1e-9;
+        }
+        return display.equals(expected);
+    }
+
+    /** 数值比较 op：gt/lt/ge/le；任一非数字则判失败。 */
+    private boolean jsonCompareNum(Object val, String expected, String op) {
+        Double a = toDouble(val);
+        Double b = toDouble(expected);
+        if (a == null || b == null) {
+            return false;
+        }
+        switch (op) {
+            case "gt": return a > b;
+            case "lt": return a < b;
+            case "ge": return a >= b;
+            case "le": return a <= b;
+            default: return false;
+        }
+    }
+
+    private Double toDouble(Object o) {
+        try {
+            if (o instanceof Number) {
+                return ((Number) o).doubleValue();
+            }
+            String s = o == null ? "" : String.valueOf(o).trim();
+            return s.isEmpty() ? null : Double.parseDouble(s);
         } catch (Exception e) {
             return null;
         }

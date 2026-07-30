@@ -154,7 +154,16 @@
           <el-input v-if="['header','jsonPath','headerExists'].includes(a.type)" v-model="a.target" :placeholder="a.type === 'jsonPath' ? '$.data.id' : 'Header-Name'" style="width:22%" />
           <el-select v-else disabled style="width:22%" />
           <el-select v-if="['header','jsonPath'].includes(a.type)" v-model="a.op" style="width:90px">
-            <el-option label="等于 eq" value="eq" /><el-option label="包含 contains" value="contains" /><el-option label="存在 exists" value="exists" v-if="a.type === 'jsonPath'" />
+            <el-option label="等于 =" value="eq" />
+            <el-option label="包含 contains" value="contains" />
+            <template v-if="a.type === 'jsonPath'">
+              <el-option label="不等于 ≠" value="ne" />
+              <el-option label="大于 >" value="gt" />
+              <el-option label="小于 <" value="lt" />
+              <el-option label="大于等于 ≥" value="ge" />
+              <el-option label="小于等于 ≤" value="le" />
+              <el-option label="存在 exists" value="exists" />
+            </template>
           </el-select>
           <el-input v-if="a.op !== 'exists' && a.type !== 'headerExists'" v-model="a.expected" :placeholder="a.type === 'jsonSchema' ? 'JSON Schema' : (a.type === 'latencyLt' ? 'ms 阈值' : a.type === 'sizeGt' ? 'bytes 阈值' : '期望值')" style="width:30%" />
           <el-button :icon="Delete" circle size="small" type="danger" @click="form.assertions.splice(i,1)" />
@@ -635,7 +644,16 @@ function evalAssertionsClient(status, headers, body, assertions) {
       if (type === 'status') { actual = String(status); passed = actual === expected }
       else if (type === 'bodyContains') { actual = body || ''; passed = actual.includes(expected) }
       else if (type === 'header') { const hv = headers[(target || '').toLowerCase()] || ''; actual = hv; passed = op === 'contains' ? hv.includes(expected) : hv === expected }
-      else if (type === 'jsonPath') { const v = getJsonPath(body, target); if (op === 'exists') { actual = v === undefined ? '(无)' : String(v); passed = v !== undefined } else { actual = v == null ? '' : String(v); passed = op === 'contains' ? actual.includes(expected) : actual === expected } }
+      else if (type === 'jsonPath') {
+        const v = getJsonPath(body, target)
+        const disp = (v === undefined || v === null) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v))
+        actual = disp
+        if (op === 'exists') { actual = (v === undefined || v === null) ? '(无)' : disp; passed = v !== undefined && v !== null }
+        else if (op === 'contains') { passed = disp.includes(expected) }
+        else if (op === 'ne') { passed = !smartEq(v, disp, expected) }
+        else if (['gt', 'lt', 'ge', 'le'].includes(op)) { passed = cmpNum(v, expected, op) }
+        else { passed = smartEq(v, disp, expected) } // eq
+      }
     } catch (e) { actual = '解析失败' }
     return { type, target, op, expected, actual, passed }
   })
@@ -647,6 +665,29 @@ function getJsonPath(body, path) {
   const parts = path.replace(/^\$\.?/, '').split(/\.|\[(\d+)\]/).filter((p) => p !== '' && p !== undefined)
   for (const p of parts) { if (o == null) return undefined; o = o[p] }
   return o
+}
+
+// 数值感知比较（与后端 evalAssertion 对齐）：两边均可解析为数字时按数值比
+function toNum(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  const s = String(v == null ? '' : v).trim()
+  if (s === '') return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+function smartEq(v, disp, expected) {
+  const a = toNum(v), b = toNum(expected)
+  if (a !== null && b !== null) return Math.abs(a - b) < 1e-9
+  return disp === expected
+}
+function cmpNum(v, expected, op) {
+  const a = toNum(v), b = toNum(expected)
+  if (a === null || b === null) return false
+  if (op === 'gt') return a > b
+  if (op === 'lt') return a < b
+  if (op === 'ge') return a >= b
+  if (op === 'le') return a <= b
+  return false
 }
 
 function showResult(r) { result.value = r; resultVisible.value = true }
