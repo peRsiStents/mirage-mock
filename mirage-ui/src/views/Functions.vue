@@ -7,7 +7,7 @@
           <el-input v-model="keyword" placeholder="搜索函数名/说明" style="width: 240px" clearable />
         </div>
       </template>
-      <el-table :data="filtered" v-loading="loading" border stripe>
+      <el-table :data="filtered" v-loading="loading" border stripe size="small">
         <el-table-column prop="name" label="函数" width="200">
           <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
         </el-table-column>

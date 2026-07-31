@@ -290,6 +290,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { copyText } from '../utils/clipboard'
 
 const tab = ref('json')
 const running = ref(false)
@@ -306,26 +307,13 @@ async function exec(call, payload, onOk) {
   }
 }
 
-async function copyVal(v) {
-  if (!v) { ElMessage.warning('内容为空'); return }
-  let ok = false
-  try {
-    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(v); ok = true }
-  } catch (e) { /* fallback */ }
-  if (!ok) {
-    const ta = document.createElement('textarea'); ta.value = v
-    ta.style.position = 'fixed'; ta.style.top = '-9999px'; ta.style.opacity = '0'
-    document.body.appendChild(ta); ta.focus(); ta.select()
-    ok = document.execCommand('copy'); document.body.removeChild(ta)
-  }
-  if (ok) ElMessage.success('已复制到剪贴板'); else ElMessage.warning('复制失败，请手动选中')
-}
-
 // 按当前 tab 复制对应输出框内容
 function copyCurrentOut() {
   const m = { json: jsonOut, xml: xmlOut, sql: sqlOut, sm3: sm3Out, sm4: sm4Out, sm2: sm2Out, rsa: rsaOut, enc: encOut }
   const r = m[tab.value]
-  copyVal(r ? r.value : '')
+  const v = r ? r.value : ''
+  if (!v) { ElMessage.warning('内容为空'); return }
+  copyText(v)
 }
 
 // ---------- JSON ----------

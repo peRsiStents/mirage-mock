@@ -14,7 +14,7 @@
           </div>
         </div>
       </template>
-      <el-table :data="list" v-loading="loading" border stripe>
+      <el-table :data="list" v-loading="loading" border stripe size="small">
         <template #empty>
           <el-empty description="暂无密钥">
             <el-button type="primary" size="small" @click="openCreate">录入密钥</el-button>

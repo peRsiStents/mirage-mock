@@ -8,7 +8,7 @@
           <el-button type="primary" :icon="Plus" @click="openCreate">新建环境</el-button>
         </div>
       </template>
-      <el-table :data="list" v-loading="loading" border stripe>
+      <el-table :data="list" v-loading="loading" border stripe size="small">
         <template #empty>
           <el-empty description="暂无环境">
             <el-button type="primary" size="small" @click="openCreate">新建环境</el-button>

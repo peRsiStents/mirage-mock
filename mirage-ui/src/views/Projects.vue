@@ -7,7 +7,7 @@
           <el-button type="primary" :icon="Plus" @click="openCreate">新建项目</el-button>
         </div>
       </template>
-      <el-table :data="list" v-loading="loading" border stripe>
+      <el-table :data="list" v-loading="loading" border stripe size="small">
         <el-table-column prop="name" label="项目名称" />
         <el-table-column prop="code" label="编码" width="160" />
         <el-table-column prop="ruleVersion" label="规则版本" width="100" />

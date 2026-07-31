@@ -7,7 +7,7 @@
           <el-button type="primary" :icon="Plus" @click="openCreate">新建用户</el-button>
         </div>
       </template>
-      <el-table :data="list" v-loading="loading" border stripe>
+      <el-table :data="list" v-loading="loading" border stripe size="small">
         <el-table-column prop="username" label="用户名" width="160" />
         <el-table-column prop="nickname" label="昵称" width="160" />
         <el-table-column label="角色" width="120">

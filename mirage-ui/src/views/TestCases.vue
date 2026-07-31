@@ -12,7 +12,7 @@
           </div>
         </div>
       </template>
-      <el-table :data="filtered" v-loading="loading" border stripe>
+      <el-table :data="filtered" v-loading="loading" border stripe size="small">
         <template #empty>
           <el-empty description="暂无用例">
             <el-button type="primary" size="small" @click="openCreate">新建用例</el-button>

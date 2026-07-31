@@ -10,7 +10,7 @@ export async function copyText(text) {
   if (!text) return
   const ok = await doCopy(text)
   if (ok) {
-    ElMessage.success('已复制：' + text)
+    ElMessage.success('已复制到剪贴板')
   } else {
     ElMessage.warning('复制失败，请手动选中复制')
   }
