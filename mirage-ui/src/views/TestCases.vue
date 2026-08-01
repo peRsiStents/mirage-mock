@@ -20,7 +20,7 @@
         </template>
         <el-table-column prop="name" label="名称" width="160" />
         <el-table-column label="请求" show-overflow-tooltip>
-          <template #default="{ row }"><el-tag size="small" :type="mTag(row.method)">{{ row.method }}</el-tag> <span class="mono">{{ row.url }}</span></template>
+          <template #default="{ row }"><el-tag size="small" :type="row.protocol === 'TCP' ? 'warning' : mTag(row.method)">{{ row.protocol === 'TCP' ? 'TCP' : row.method }}</el-tag> <span class="mono">{{ row.url }}</span></template>
         </el-table-column>
         <el-table-column label="模式" width="90">
           <template #default="{ row }">{{ row.mode === 'direct' ? '浏览器直发' : '后端转发' }}</template>
