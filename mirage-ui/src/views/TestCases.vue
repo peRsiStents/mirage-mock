@@ -50,6 +50,15 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item label="协议" label-width="56px">
+          <el-radio-group v-model="form.protocol">
+            <el-radio label="HTTP">HTTP</el-radio>
+            <el-radio label="TCP">TCP</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
+        <!-- ===== HTTP ===== -->
+        <template v-if="form.protocol === 'HTTP'">
         <el-divider content-position="left">请求</el-divider>
         <div class="hint">
           URL/请求头/查询/Body 支持 <span class="mono">${var.变量名}</span> 与函数（如 <span class="mono">${uuid()}</span>、<span class="mono">${int(1,100)}</span>，函数仅「后端转发」模式求值）。
@@ -144,6 +153,30 @@
         <el-divider content-position="left">curl 导入</el-divider>
         <el-input v-model="curlText" type="textarea" :rows="2" placeholder="粘贴 curl 命令，点解析自动填充上方请求" />
         <el-button size="small" type="primary" style="margin-top:6px" @click="onImportCurl">解析 curl</el-button>
+
+        </template>
+
+        <!-- ===== TCP ===== -->
+        <template v-else>
+          <el-divider content-position="left">TCP 请求</el-divider>
+          <div class="hint">
+            目标 host:port；请求字段为 JSON 对象（值支持 <span class="mono">${var.x}</span>）。可从本项目 TCP 监听器一键填充帧/格式配置。
+            响应按报文格式解析为字段，用 JSONPath 断言（如 <span class="mono">$.respCode</span>）。
+          </div>
+          <el-row :gutter="8" style="margin-bottom:6px">
+            <el-col :span="12"><el-input v-model="form.url" placeholder="localhost:9001" /></el-col>
+            <el-col :span="12">
+              <el-select v-model="listenerPick" placeholder="从 TCP 监听器填充配置" clearable filterable style="width:100%" @change="fillFromListener">
+                <el-option v-for="l in tcpListeners" :key="l.id" :label="l.name + ' (' + l.port + ')'" :value="l.id" />
+              </el-select>
+            </el-col>
+          </el-row>
+          <div class="kv-title">请求字段（JSON 对象）</div>
+          <textarea v-model="form.body" class="body-area" rows="4" spellcheck="false" placeholder='{"transCode":"0200","serialNo":"${var.sn}","amount":"100.00"}'></textarea>
+          <div class="kv-title" style="margin-top:10px">帧 / 格式配置（tcp_config，JSON）</div>
+          <textarea v-model="form.tcpConfig" class="body-area" rows="3" spellcheck="false" placeholder='{"frameConfig":{"type":"length_field","lenBytes":4,"initialStrip":4},"messageFormat":"json"}'></textarea>
+          <div class="hint" style="margin-top:4px">短连接一问一答；length_field 自动前置大端长度头，delimiter 追加分隔符，fixed 定长，close_end 原样。</div>
+        </template>
 
         <el-divider content-position="left">断言</el-divider>
         <div v-for="(a, i) in form.assertions" :key="'a'+i" class="kv-row">
@@ -307,7 +340,7 @@ const filtered = computed(() => {
 const formVisible = ref(false)
 const sending = ref(false)
 const curlText = ref('')
-const form = reactive({ id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
+const form = reactive({ id: null, name: '', protocol: 'HTTP', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', tcpConfig: '', formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
 
 const resultVisible = ref(false)
 const result = ref(null)
@@ -347,18 +380,21 @@ async function load() {
 }
 
 function openCreate() {
-  Object.assign(form, { id: null, name: '', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
+  Object.assign(form, { id: null, name: '', protocol: 'HTTP', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', tcpConfig: '', formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
+  listenerPick.value = ''
   curlText.value = ''
   formVisible.value = true
 }
 
 function openEdit(row) {
   form.id = row.id
-  form.name = row.name; form.method = row.method || 'GET'; form.url = row.url || ''
+  form.name = row.name; form.protocol = row.protocol || 'HTTP'; form.method = row.method || 'GET'; form.url = row.url || ''
+  form.tcpConfig = row.tcpConfig || ''
   loadBody(row)
   form.mode = row.mode || 'proxy'; form.status = row.status == null ? 1 : row.status; form.remark = row.remark || ''
   form.headers = parseArr(row.headers); form.query = parseArr(row.query); form.assertions = parseArr(row.assertions)
   form.dataSet = row.dataSet || ''
+  listenerPick.value = ''
   curlText.value = ''
   formVisible.value = true
 }
@@ -470,8 +506,9 @@ function buildDirectBody() {
 
 function buildEntity() {
   return {
-    id: form.id, name: form.name, method: form.method, url: form.url,
+    id: form.id, name: form.name, protocol: form.protocol, method: form.method, url: form.url,
     bodyType: form.bodyType, body: serializeBody(), bodyContentType: serializeContentType(),
+    tcpConfig: form.protocol === 'TCP' ? form.tcpConfig : '',
     mode: form.mode, status: form.status, remark: form.remark,
     headers: JSON.stringify(form.headers.filter((h) => h.k)),
     query: JSON.stringify(form.query.filter((q) => q.k)),
@@ -718,9 +755,30 @@ async function onRemove(row) {
 }
 
 watch(() => proj.id, () => { load(); loadVariables() })
+// TCP 监听器：填充帧/格式配置
+const tcpListeners = ref([])
+const listenerPick = ref('')
+async function loadListeners() {
+  if (!proj.id) { tcpListeners.value = []; return }
+  try { const r = await api.listeners.list(proj.id); tcpListeners.value = r.data || [] } catch (e) { tcpListeners.value = [] }
+}
+function fillFromListener(id) {
+  const l = tcpListeners.value.find((x) => x.id === id)
+  if (!l) return
+  form.url = 'localhost:' + l.port
+  let formatConfig = null
+  try { formatConfig = l.messageFormatConfig ? JSON.parse(l.messageFormatConfig) : null } catch (e) { /* 留空 */ }
+  form.tcpConfig = JSON.stringify({
+    frameConfig: l.frameConfig || '',
+    messageFormat: l.messageFormat || 'json',
+    formatConfig
+  })
+}
+
 onMounted(() => {
   load()
   loadVariables()
+  loadListeners()
   // 来自「请求日志 → 生成用例」的草稿：取出并打开新建弹窗（id 为空即新建）
   const draft = draftStore.take()
   if (draft) {

@@ -22,6 +22,9 @@ import com.miragemock.dsl.eval.EvalContext;
 import com.miragemock.dsl.eval.ExpressionEvaluator;
 import com.miragemock.dsl.spi.SecretResolver;
 import com.miragemock.dsl.spi.SeqProvider;
+import com.miragemock.tcp.codec.MessageParser;
+import com.miragemock.tcp.codec.MessageParserRegistry;
+import com.miragemock.tcp.frame.FrameEncoder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
@@ -34,6 +37,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
@@ -61,12 +71,14 @@ public class TestCaseService {
     private final ExpressionEvaluator evaluator;
     private final SecretResolver secretResolver;
     private final SeqProvider seqProvider;
+    private final MessageParserRegistry parserRegistry;
 
     @Autowired
     public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestRunRecordMapper recordMapper,
                            TestVariableMapper variableMapper, TestEnvironmentMapper environmentMapper,
                            RestTemplate restTemplate, ExpressionEvaluator evaluator,
-                           SecretResolver secretResolver, SeqProvider seqProvider) {
+                           SecretResolver secretResolver, SeqProvider seqProvider,
+                           MessageParserRegistry parserRegistry) {
         this.caseMapper = caseMapper;
         this.logMapper = logMapper;
         this.recordMapper = recordMapper;
@@ -76,6 +88,7 @@ public class TestCaseService {
         this.evaluator = evaluator;
         this.secretResolver = secretResolver;
         this.seqProvider = seqProvider;
+        this.parserRegistry = parserRegistry;
     }
 
     // ============ CRUD ============
@@ -119,6 +132,8 @@ public class TestCaseService {
         if (patch.getMode() != null) exists.setMode(patch.getMode());
         if (patch.getStatus() != null) exists.setStatus(patch.getStatus());
         if (patch.getRemark() != null) exists.setRemark(patch.getRemark());
+        if (patch.getProtocol() != null) exists.setProtocol(patch.getProtocol());
+        if (patch.getTcpConfig() != null) exists.setTcpConfig(patch.getTcpConfig());
         normalize(exists);
         caseMapper.updateById(exists);
         return exists;
@@ -133,6 +148,7 @@ public class TestCaseService {
 
     private void normalize(TestCase t) {
         if (t.getStatus() == null) t.setStatus(Constants.STATUS_ENABLED);
+        if (t.getProtocol() == null || t.getProtocol().isEmpty()) t.setProtocol("HTTP");
         if (t.getMethod() == null || t.getMethod().isEmpty()) t.setMethod("GET");
         if (t.getBodyType() == null || t.getBodyType().isEmpty()) t.setBodyType("none");
         if (t.getMode() == null || t.getMode().isEmpty()) t.setMode("proxy");
@@ -240,7 +256,17 @@ public class TestCaseService {
     public RunResult executeCase(TestCase tc, EvalContext ctx) {
         RunResult rr = new RunResult();
         rr.setAssertions(new ArrayList<>());
+        if ("TCP".equalsIgnoreCase(tc.getProtocol())) {
+            executeTcp(tc, ctx, rr);
+        } else {
+            executeHttp(tc, ctx, rr);
+        }
+        evalAssertions(rr, tc, ctx);
+        return rr;
+    }
 
+    /** HTTP 执行（RestTemplate 转发）。 */
+    private void executeHttp(TestCase tc, EvalContext ctx, RunResult rr) {
         String fullUrl;
         HttpHeaders httpHeaders;
         RequestBody reqBody;
@@ -253,14 +279,11 @@ public class TestCaseService {
             method = HttpMethod.valueOf(tc.getMethod().toUpperCase());
         } catch (BizException e) {
             rr.setError(e.getMessage());
-            rr.setPassed(false);
-            return rr;
+            return;
         } catch (Exception e) {
             rr.setError("用例配置有误: " + rootMessage(e));
-            rr.setPassed(false);
-            return rr;
+            return;
         }
-
         long t0 = System.currentTimeMillis();
         try {
             if (reqBody.contentType != null && !httpHeaders.containsKey("Content-Type")) {
@@ -275,8 +298,78 @@ public class TestCaseService {
             rr.setError("请求失败: " + rootMessage(e));
         }
         rr.setCostMs(System.currentTimeMillis() - t0);
+    }
 
-        // 断言求值
+    /** TCP 执行：按 tcp_config 加帧发送、短连接读裸 body、按报文格式解析为字段 JSON 赋给 body。 */
+    private void executeTcp(TestCase tc, EvalContext ctx, RunResult rr) {
+        long t0 = System.currentTimeMillis();
+        try {
+            Map<String, Object> tcpCfg = parseTcpConfig(tc.getTcpConfig());
+            String frameConfig = str(tcpCfg.get("frameConfig"));
+            String messageFormat = str(tcpCfg.get("messageFormat"));
+            if (messageFormat.isEmpty()) {
+                messageFormat = "json";
+            }
+            Object fmtObj = tcpCfg.get("formatConfig");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> formatConfig = fmtObj instanceof Map ? (Map<String, Object>) fmtObj : null;
+
+            String target = eval(tc.getUrl() == null ? "" : tc.getUrl().trim(), ctx);
+            int colon = target.lastIndexOf(':');
+            if (colon <= 0) {
+                throw new IllegalArgumentException("目标应为 host:port：" + target);
+            }
+            String host = target.substring(0, colon).trim();
+            int port = Integer.parseInt(target.substring(colon + 1).trim());
+            if (host.isEmpty()) {
+                host = "localhost";
+            }
+
+            Map<String, Object> fields = JsonUtils.parseMap(eval(tc.getBody() == null ? "{}" : tc.getBody(), ctx));
+            if (fields == null) {
+                fields = new LinkedHashMap<>();
+            }
+            MessageParser parser = parserRegistry.resolve(messageFormat);
+            byte[] payload = parser.encode(fields, formatConfig);
+            byte[] framed = FrameEncoder.encode(payload, frameConfig);
+            byte[] resp = tcpRoundTrip(host, port, framed);
+            Map<String, Object> respFields = parser.parse(resp, formatConfig);
+            rr.setBody(JsonUtils.toJson(respFields));
+            rr.setHeaders(new HashMap<>());
+        } catch (Exception e) {
+            rr.setError("TCP 请求失败: " + rootMessage(e));
+        }
+        rr.setCostMs(System.currentTimeMillis() - t0);
+    }
+
+    /** 短连接：发完 shutdown 输出（触发 close_end/短连接回写），读响应至 EOF。 */
+    private byte[] tcpRoundTrip(String host, int port, byte[] request) throws IOException {
+        try (Socket sock = new Socket()) {
+            sock.connect(new InetSocketAddress(host, port), 5000);
+            sock.setSoTimeout(10000);
+            OutputStream out = sock.getOutputStream();
+            out.write(request);
+            out.flush();
+            sock.shutdownOutput();
+            return readUntilEnd(sock.getInputStream());
+        }
+    }
+
+    private byte[] readUntilEnd(InputStream in) throws IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        byte[] tmp = new byte[4096];
+        int n;
+        try {
+            while ((n = in.read(tmp)) != -1) {
+                buf.write(tmp, 0, n);
+            }
+        } catch (SocketTimeoutException e) {
+            // 长连接场景：响应已到、对端未关连接，SO_TIMEOUT 视为读完成
+        }
+        return buf.toByteArray();
+    }
+
+    private void evalAssertions(RunResult rr, TestCase tc, EvalContext ctx) {
         boolean allPassed = true;
         for (Map<String, Object> a : parseList(tc.getAssertions())) {
             a.put("expected", eval(str(a.get("expected")), ctx));
@@ -288,7 +381,15 @@ public class TestCaseService {
             }
         }
         rr.setPassed(allPassed && rr.getError() == null);
-        return rr;
+    }
+
+    /** tcp_config JSON → {frameConfig, messageFormat, formatConfig}。 */
+    private Map<String, Object> parseTcpConfig(String tcpConfig) {
+        if (tcpConfig == null || tcpConfig.trim().isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        Map<String, Object> m = JsonUtils.parseMap(tcpConfig);
+        return m == null ? new LinkedHashMap<>() : m;
     }
 
     /** 从响应提取变量（供场景步骤间传递）。返回 Map 键为 var.<name> */

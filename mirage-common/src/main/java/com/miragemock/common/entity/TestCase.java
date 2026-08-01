@@ -17,7 +17,10 @@ public class TestCase extends BaseEntity {
 
     private String name;
 
-    /** GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS */
+    /** 协议：HTTP（默认）/ TCP。TCP 时 url=host:port，body=请求字段 JSON，tcp_config 描述帧/报文格式。 */
+    private String protocol;
+
+    /** GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS（HTTP 用） */
     private String method;
 
     private String url;
@@ -38,6 +41,9 @@ public class TestCase extends BaseEntity {
 
     /** raw / binary 的显式 Content-Type（如 application/json、application/octet-stream）；结构化类型忽略。 */
     private String bodyContentType;
+
+    /** TCP 专用：JSON {frameConfig, messageFormat, formatConfig}，描述请求加帧与响应报文格式。 */
+    private String tcpConfig;
 
     /** JSON: [{type,target,op,expected}] */
     private String assertions;
