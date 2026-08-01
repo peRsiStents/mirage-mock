@@ -39,7 +39,9 @@
           </el-select>
         </el-form-item>
         <el-form-item label="Cron">
-          <el-input v-model="form.cron" placeholder="秒 分 时 日 月 周，如 0 */5 * * * ?（每5分钟）" />
+          <el-input v-model="form.cron" placeholder="秒 分 时 日 月 周，如 0 */5 * * * ?（每5分钟）" @input="previewCron" />
+          <div v-if="cronNexts.length" class="hint" style="margin-top:4px">下次运行：{{ cronNexts.join('、') }}</div>
+          <div v-if="cronError" class="err" style="margin-top:4px">{{ cronError }}</div>
         </el-form-item>
         <el-form-item label="环境">
           <el-select v-model="form.envId" clearable placeholder="可选">
@@ -99,6 +101,26 @@ const form = reactive({ id: null, name: '', scenarioId: null, cron: '0 */5 * * *
 const resultVisible = ref(false)
 const result = ref(null)
 
+const cronNexts = ref([])
+const cronError = ref('')
+let cronTimer = null
+async function previewCron() {
+  if (cronTimer) { clearTimeout(cronTimer); cronTimer = null }
+  cronNexts.value = []
+  const c = (form.cron || '').trim()
+  if (!c) { cronError.value = ''; return }
+  cronTimer = setTimeout(async () => {
+    try {
+      const res = await api.schedules.cronPreview(c, 3)
+      cronNexts.value = res.data || []
+      cronError.value = ''
+    } catch (e) {
+      cronNexts.value = []
+      cronError.value = (e && e.message) ? e.message : 'cron 非法'
+    }
+  }, 350)
+}
+
 function short(v) { const s = String(v); return s.length > 80 ? s.slice(0, 80) + '…' : s }
 
 function scenarioName(id) { const s = scenarios.value.find(x => x.id === id); return s ? s.name : '—' }
@@ -112,8 +134,8 @@ async function load() {
   } finally { loading.value = false }
 }
 
-function openCreate() { Object.assign(form, { id: null, name: '', scenarioId: null, cron: '0 */5 * * * ?', envId: null, enabled: 1, remark: '' }); formVisible.value = true }
-function openEdit(row) { Object.assign(form, { id: row.id, name: row.name, scenarioId: row.scenarioId, cron: row.cron, envId: row.envId, enabled: row.enabled, remark: row.remark || '' }); formVisible.value = true }
+function openCreate() { Object.assign(form, { id: null, name: '', scenarioId: null, cron: '0 */5 * * * ?', envId: null, enabled: 1, remark: '' }); cronNexts.value = []; cronError.value = ''; previewCron(); formVisible.value = true }
+function openEdit(row) { Object.assign(form, { id: row.id, name: row.name, scenarioId: row.scenarioId, cron: row.cron, envId: row.envId, enabled: row.enabled, remark: row.remark || '' }); cronNexts.value = []; cronError.value = ''; previewCron(); formVisible.value = true }
 
 async function onSave() {
   if (!form.name || !form.name.trim()) { ElMessage.warning('请输入名称'); return }

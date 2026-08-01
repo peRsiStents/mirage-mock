@@ -21,7 +21,9 @@ http.interceptors.response.use(
       if (body.code === 0) {
         return body
       }
-      ElMessage.error(body.message || '错误码 ' + body.code)
+      if (!resp.config || !resp.config.silent) {
+        ElMessage.error(body.message || '错误码 ' + body.code)
+      }
       return Promise.reject(new Error(body.message || 'biz error'))
     }
     return body
@@ -33,7 +35,7 @@ http.interceptors.response.use(
         location.hash = '#/login'
       }
       ElMessage.error('登录已失效，请重新登录')
-    } else {
+    } else if (!err.config || !err.config.silent) {
       ElMessage.error(err.response?.data?.message || err.message || '请求失败')
     }
     return Promise.reject(err)

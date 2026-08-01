@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -58,5 +59,17 @@ public class ScheduleController {
     @PostMapping("/schedules/{id}/run")
     public Result<ScenarioRunResult> run(@PathVariable Long id) {
         return Result.ok(service.runNow(id));
+    }
+
+    /** 校验 cron 并预览接下来几次触发时间（与调度器同源）。非法返回 400 + 错误信息。 */
+    @GetMapping("/schedules/cron-preview")
+    public Result<java.util.List<String>> cronPreview(@RequestParam String cron,
+                                                      @RequestParam(defaultValue = "3") int count) {
+        java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        java.util.List<String> times = new java.util.ArrayList<>();
+        for (java.time.LocalDateTime t : service.cronPreview(cron, count)) {
+            times.add(t.format(fmt));
+        }
+        return Result.ok(times);
     }
 }

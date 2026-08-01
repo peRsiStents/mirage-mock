@@ -147,6 +147,7 @@ export const api = {
     update: (id, s) => http.put(`/schedules/${id}`, s),
     remove: (id) => http.delete(`/schedules/${id}`),
     toggle: (id) => http.post(`/schedules/${id}/toggle`),
-    run: (id) => http.post(`/schedules/${id}/run`)
+    run: (id) => http.post(`/schedules/${id}/run`),
+    cronPreview: (cron, count) => http.get('/schedules/cron-preview', { params: { cron, count }, silent: true })
   }
 }

@@ -9,10 +9,13 @@ import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.TestSchedule;
 import com.miragemock.common.exception.BizException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /** 定时任务管理：CRUD + cron 校验 + 委托 ScheduleManager 注册/注销 + 立即运行 */
@@ -98,6 +101,30 @@ public class ScheduleService {
         // 委托 ScheduleManager.runOnce：跑场景并回写 last_run_time/passed/cost
         get(id);
         return scheduleManager.runOnce(id);
+    }
+
+    /** 校验 cron 并返回接下来 count 次触发时间（与调度器同源 CronExpression）。非法抛 BizException。 */
+    public List<LocalDateTime> cronPreview(String cron, int count) {
+        if (cron == null || cron.trim().isEmpty()) {
+            throw new BizException(ResultCode.BAD_REQUEST, "cron 不能为空");
+        }
+        CronExpression expr;
+        try {
+            expr = CronExpression.parse(cron.trim());
+        } catch (IllegalArgumentException e) {
+            throw new BizException(ResultCode.BAD_REQUEST, "cron 表达式非法: " + e.getMessage());
+        }
+        int n = (count <= 0 || count > 10) ? 3 : count;
+        List<LocalDateTime> out = new ArrayList<>();
+        LocalDateTime t = LocalDateTime.now();
+        for (int i = 0; i < n; i++) {
+            t = expr.next(t);
+            if (t == null) {
+                break;
+            }
+            out.add(t);
+        }
+        return out;
     }
 
     private void validateCron(String cron) {
