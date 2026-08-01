@@ -174,6 +174,7 @@ CREATE TABLE test_case (
     mode       VARCHAR(16)  DEFAULT 'proxy',
     status     TINYINT      DEFAULT 1,
     remark     VARCHAR(512),
+    tags       VARCHAR(512),
     create_time DATETIME,
     update_time DATETIME
 );

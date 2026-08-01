@@ -6,7 +6,10 @@
         <div class="card-header">
           <span>测试用例 <el-tag size="small">{{ proj.name }}</el-tag></span>
           <div>
-            <el-input v-model="keyword" placeholder="搜索 名称/方法/URL" clearable size="small" style="width:220px;margin-right:8px" />
+            <el-input v-model="keyword" placeholder="搜索 名称/方法/URL" clearable size="small" style="width:200px;margin-right:8px" />
+            <el-select v-model="tagFilter" multiple filterable collapse-tags collapse-tags-tooltip placeholder="按标签" clearable size="small" style="width:170px;margin-right:8px">
+              <el-option v-for="t in allTags" :key="t" :label="t" :value="t" />
+            </el-select>
             <el-button @click="openVariables">变量/常量</el-button>
             <el-button @click="triggerImport" title="导入 JSON（单条对象或数组）">导入</el-button>
             <el-button @click="exportAll" title="导出当前项目全部用例为 JSON">导出全部</el-button>
@@ -22,6 +25,11 @@
           </el-empty>
         </template>
         <el-table-column prop="name" label="名称" width="160" />
+        <el-table-column label="标签" width="170">
+          <template #default="{ row }">
+            <el-tag v-for="t in parseArr(row.tags)" :key="t" size="small" type="info" effect="plain" style="margin:1px">{{ t }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="请求" show-overflow-tooltip>
           <template #default="{ row }"><el-tag size="small" :type="row.protocol === 'TCP' ? 'warning' : mTag(row.method)">{{ row.protocol === 'TCP' ? 'TCP' : row.method }}</el-tag> <span class="mono">{{ row.url }}</span></template>
         </el-table-column>
@@ -59,6 +67,12 @@
             <el-radio label="HTTP">HTTP</el-radio>
             <el-radio label="TCP">TCP</el-radio>
           </el-radio-group>
+        </el-form-item>
+
+        <el-form-item label="标签" label-width="56px">
+          <el-select v-model="form.tagsArr" multiple filterable allow-create default-first-option :reserve-keyword="false" placeholder="回车添加，如 smoke / P0 / slow" style="width:100%">
+            <el-option v-for="t in allTags" :key="t" :label="t" :value="t" />
+          </el-select>
         </el-form-item>
 
         <!-- ===== HTTP ===== -->
@@ -335,16 +349,32 @@ const draftStore = useTestCaseDraftStore()
 const list = ref([])
 const loading = ref(false)
 const keyword = ref('')
+const tagFilter = ref([])
+const allTags = computed(() => {
+  const s = new Set()
+  for (const c of list.value) {
+    for (const x of parseArr(c.tags)) s.add(x)
+  }
+  return Array.from(s).sort()
+})
 const filtered = computed(() => {
   const k = keyword.value.trim().toLowerCase()
-  if (!k) return list.value
-  return list.value.filter((t) => ((t.name || '') + ' ' + (t.method || '') + ' ' + (t.url || '')).toLowerCase().includes(k))
+  const tf = tagFilter.value
+  if (!k && !tf.length) return list.value
+  return list.value.filter((t) => {
+    if (k && !((t.name || '') + ' ' + (t.method || '') + ' ' + (t.url || '')).toLowerCase().includes(k)) return false
+    if (tf.length) {
+      const tags = parseArr(t.tags)
+      if (!tf.some((f) => tags.includes(f))) return false
+    }
+    return true
+  })
 })
 
 const formVisible = ref(false)
 const sending = ref(false)
 const curlText = ref('')
-const form = reactive({ id: null, name: '', protocol: 'HTTP', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', tcpConfig: '', formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
+const form = reactive({ id: null, name: '', protocol: 'HTTP', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', tcpConfig: '', tagsArr: [], formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
 
 const resultVisible = ref(false)
 const result = ref(null)
@@ -384,7 +414,7 @@ async function load() {
 }
 
 function openCreate() {
-  Object.assign(form, { id: null, name: '', protocol: 'HTTP', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', tcpConfig: '', formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
+  Object.assign(form, { id: null, name: '', protocol: 'HTTP', method: 'GET', url: '', headers: [], query: [], bodyType: 'none', body: '', bodyContentType: '', tcpConfig: '', tagsArr: [], formRows: [], binaryFile: {}, assertions: [], mode: 'proxy', status: 1, remark: '', dataSet: '' })
   listenerPick.value = ''
   curlText.value = ''
   formVisible.value = true
@@ -394,6 +424,7 @@ function openEdit(row) {
   form.id = row.id
   form.name = row.name; form.protocol = row.protocol || 'HTTP'; form.method = row.method || 'GET'; form.url = row.url || ''
   form.tcpConfig = row.tcpConfig || ''
+  form.tagsArr = parseArr(row.tags)
   loadBody(row)
   form.mode = row.mode || 'proxy'; form.status = row.status == null ? 1 : row.status; form.remark = row.remark || ''
   form.headers = parseArr(row.headers); form.query = parseArr(row.query); form.assertions = parseArr(row.assertions)
@@ -513,6 +544,7 @@ function buildEntity() {
     id: form.id, name: form.name, protocol: form.protocol, method: form.method, url: form.url,
     bodyType: form.bodyType, body: serializeBody(), bodyContentType: serializeContentType(),
     tcpConfig: form.protocol === 'TCP' ? form.tcpConfig : '',
+    tags: JSON.stringify(form.tagsArr || []),
     mode: form.mode, status: form.status, remark: form.remark,
     headers: JSON.stringify(form.headers.filter((h) => h.k)),
     query: JSON.stringify(form.query.filter((q) => q.k)),

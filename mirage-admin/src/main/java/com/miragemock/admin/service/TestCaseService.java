@@ -137,6 +137,7 @@ public class TestCaseService {
         if (patch.getRemark() != null) exists.setRemark(patch.getRemark());
         if (patch.getProtocol() != null) exists.setProtocol(patch.getProtocol());
         if (patch.getTcpConfig() != null) exists.setTcpConfig(patch.getTcpConfig());
+        if (patch.getTags() != null) exists.setTags(patch.getTags());
         normalize(exists);
         caseMapper.updateById(exists);
         return exists;

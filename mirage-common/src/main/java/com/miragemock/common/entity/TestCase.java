@@ -57,4 +57,7 @@ public class TestCase extends BaseEntity {
     private Integer status;
 
     private String remark;
+
+    /** JSON 数组字符串，如 ["smoke","slow"]；用于分组/筛选。 */
+    private String tags;
 }
