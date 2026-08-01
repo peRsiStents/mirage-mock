@@ -154,6 +154,7 @@ function buildReq() {
 }
 
 async function onSave() {
+  if (!form.name || !form.name.trim()) { ElMessage.warning('请输入模板名称'); return }
   const payload = { ...form }
   if (form.id) {
     await api.fileTemplates.update(form.id, payload)

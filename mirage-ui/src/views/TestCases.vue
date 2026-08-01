@@ -517,7 +517,22 @@ function buildEntity() {
   }
 }
 
+function validateCase() {
+  if (!form.name || !form.name.trim()) { ElMessage.warning('请输入用例名称'); return false }
+  if (form.protocol === 'TCP') {
+    if (!form.url || !form.url.trim()) { ElMessage.warning('请输入目标 host:port'); return false }
+    if (!form.body || !form.body.trim()) { ElMessage.warning('请输入请求字段（JSON）'); return false }
+    try { JSON.parse(form.body) } catch (e) { ElMessage.warning('请求字段不是合法 JSON'); return false }
+    if (!form.tcpConfig || !form.tcpConfig.trim()) { ElMessage.warning('请填写或从监听器填充帧/格式配置'); return false }
+    try { JSON.parse(form.tcpConfig) } catch (e) { ElMessage.warning('tcp_config 不是合法 JSON'); return false }
+  } else {
+    if (!form.url || !form.url.trim()) { ElMessage.warning('请输入请求 URL'); return false }
+  }
+  return true
+}
+
 async function onSave() {
+  if (!validateCase()) return
   const e = buildEntity()
   if (form.id) { await api.testCases.update(form.id, e) } else { const r = await api.testCases.create(proj.id, e); form.id = r.data.id }
   ElMessage.success('已保存'); formVisible.value = false; load()
@@ -549,7 +564,7 @@ function buildUrl(f) {
 }
 
 async function onSend() {
-  if (!form.url) { ElMessage.warning('请填写 URL'); return }
+  if (!validateCase()) return
   sending.value = true
   try {
     if (form.mode === 'direct') {
@@ -578,7 +593,7 @@ async function onRun(row) {
 }
 
 async function onRunData() {
-  if (!form.url) { ElMessage.warning('请填写 URL'); return }
+  if (!validateCase()) return
   let rows = []
   if ((form.dataSet || '').trim()) {
     try { rows = JSON.parse(form.dataSet) } catch (e) { ElMessage.error('数据行 JSON 解析失败：' + e.message); return }

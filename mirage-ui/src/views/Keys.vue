@@ -102,6 +102,7 @@ function openCreate() {
 }
 
 async function onSave() {
+  if (!form.alias || !form.alias.trim()) { ElMessage.warning('请输入密钥别名'); return }
   await api.keys.create(proj.id, { ...form })
   ElMessage.success('已保存')
   formVisible.value = false

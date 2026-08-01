@@ -246,6 +246,8 @@ function openEditInterface(row) {
 }
 
 async function saveInterface() {
+  if (!ifaceForm.name || !ifaceForm.name.trim()) { ElMessage.warning('请输入接口名称'); return }
+  if (ifaceForm.protocol !== 'TCP' && (!ifaceForm.httpPath || !ifaceForm.httpPath.trim())) { ElMessage.warning('请输入接口路径'); return }
   if (ifaceForm.id) {
     await api.interfaces.update(ifaceForm.id, { ...ifaceForm })
   } else {

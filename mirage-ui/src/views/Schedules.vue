@@ -116,6 +116,9 @@ function openCreate() { Object.assign(form, { id: null, name: '', scenarioId: nu
 function openEdit(row) { Object.assign(form, { id: row.id, name: row.name, scenarioId: row.scenarioId, cron: row.cron, envId: row.envId, enabled: row.enabled, remark: row.remark || '' }); formVisible.value = true }
 
 async function onSave() {
+  if (!form.name || !form.name.trim()) { ElMessage.warning('请输入名称'); return }
+  if (!form.scenarioId) { ElMessage.warning('请选择场景'); return }
+  if (!form.cron || !form.cron.trim()) { ElMessage.warning('请输入 Cron 表达式'); return }
   const p = { name: form.name, scenarioId: form.scenarioId, cron: form.cron, envId: form.envId, enabled: form.enabled, remark: form.remark }
   if (form.id) { await api.schedules.update(form.id, p) } else { await api.schedules.create(proj.id, p) }
   ElMessage.success('已保存'); formVisible.value = false; load()

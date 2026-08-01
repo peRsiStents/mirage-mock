@@ -173,6 +173,8 @@ function openCreate() { Object.assign(form, emptyForm()); visible.value = true }
 function openEdit(row) { Object.assign(form, row); visible.value = true }
 
 async function onSave() {
+  if (!form.name || !form.name.trim()) { ElMessage.warning('请输入监听器名称'); return }
+  if (!form.port || form.port <= 0) { ElMessage.warning('请输入有效端口（1-65535）'); return }
   for (const f of ['frameConfig', 'messageFormatConfig', 'pushConfig']) {
     if (!isJson(form[f])) { ElMessage.error((cfgLabel[f] || f) + ' 不是合法 JSON，请检查'); return }
   }

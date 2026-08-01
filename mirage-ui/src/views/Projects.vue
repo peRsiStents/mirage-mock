@@ -142,6 +142,8 @@ function openEdit(row) {
 }
 
 async function onSave() {
+  if (!form.name || !form.name.trim()) { ElMessage.warning('请输入项目名称'); return }
+  if (!form.id && (!form.code || !form.code.trim())) { ElMessage.warning('请输入项目编码 code'); return }
   if (form.id) {
     await api.projects.update(form.id, { name: form.name, status: form.status, remark: form.remark })
   } else {

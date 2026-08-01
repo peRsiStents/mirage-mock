@@ -101,6 +101,11 @@ function openEdit(row) {
 }
 
 async function onSave() {
+  if (!form.nickname || !form.nickname.trim()) { ElMessage.warning('请输入昵称'); return }
+  if (!form.id) {
+    if (!form.username || !form.username.trim()) { ElMessage.warning('请输入用户名'); return }
+    if (!form.password || !form.password.trim()) { ElMessage.warning('请输入密码'); return }
+  }
   const payload = { nickname: form.nickname, isAdmin: form.isAdmin, status: form.status }
   if (form.id) {
     await api.users.update(form.id, payload)

@@ -179,6 +179,7 @@ function openEdit(row) {
 }
 
 async function onSave() {
+  if (!form.name || !form.name.trim()) { ElMessage.warning('请输入场景名称'); return }
   const payload = { name: form.name, envId: form.envId, onFail: form.onFail, remark: form.remark }
   if (form.id) { await api.scenarios.update(form.id, payload) } else { const r = await api.scenarios.create(proj.id, payload); form.id = r.data.id }
   ElMessage.success('已保存'); formVisible.value = false; load()

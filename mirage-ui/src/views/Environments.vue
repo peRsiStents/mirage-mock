@@ -83,6 +83,7 @@ function openEdit(row) {
 }
 
 async function onSave() {
+  if (!form.name || !form.name.trim()) { ElMessage.warning('请输入环境名称'); return }
   const payload = { name: form.name, baseUrl: form.baseUrl, status: form.status, variables: JSON.stringify(vars.value.filter((v) => v.name)) }
   if (form.id) { await api.environments.update(form.id, payload) } else { await api.environments.create(proj.id, payload) }
   ElMessage.success('已保存'); formVisible.value = false; load()
