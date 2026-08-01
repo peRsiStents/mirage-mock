@@ -22,6 +22,7 @@ import com.miragemock.dsl.eval.EvalContext;
 import com.miragemock.dsl.eval.ExpressionEvaluator;
 import com.miragemock.dsl.spi.SecretResolver;
 import com.miragemock.dsl.spi.SeqProvider;
+import com.miragemock.admin.security.TestTargetGuard;
 import com.miragemock.tcp.codec.MessageParser;
 import com.miragemock.tcp.codec.MessageParserRegistry;
 import com.miragemock.tcp.frame.FrameEncoder;
@@ -72,13 +73,14 @@ public class TestCaseService {
     private final SecretResolver secretResolver;
     private final SeqProvider seqProvider;
     private final MessageParserRegistry parserRegistry;
+    private final TestTargetGuard targetGuard;
 
     @Autowired
     public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestRunRecordMapper recordMapper,
                            TestVariableMapper variableMapper, TestEnvironmentMapper environmentMapper,
                            RestTemplate restTemplate, ExpressionEvaluator evaluator,
                            SecretResolver secretResolver, SeqProvider seqProvider,
-                           MessageParserRegistry parserRegistry) {
+                           MessageParserRegistry parserRegistry, TestTargetGuard targetGuard) {
         this.caseMapper = caseMapper;
         this.logMapper = logMapper;
         this.recordMapper = recordMapper;
@@ -89,6 +91,7 @@ public class TestCaseService {
         this.secretResolver = secretResolver;
         this.seqProvider = seqProvider;
         this.parserRegistry = parserRegistry;
+        this.targetGuard = targetGuard;
     }
 
     // ============ CRUD ============
@@ -274,6 +277,7 @@ public class TestCaseService {
         try {
             fullUrl = buildUrl(tc, ctx);
             validateScheme(fullUrl);
+            targetGuard.assertAllowed(new URI(fullUrl).getHost());
             httpHeaders = buildHeaders(tc, ctx);
             reqBody = buildRequestBody(tc, ctx);
             method = HttpMethod.valueOf(tc.getMethod().toUpperCase());
@@ -324,6 +328,7 @@ public class TestCaseService {
             if (host.isEmpty()) {
                 host = "localhost";
             }
+            targetGuard.assertAllowed(host);
 
             Map<String, Object> fields = JsonUtils.parseMap(eval(tc.getBody() == null ? "{}" : tc.getBody(), ctx));
             if (fields == null) {
