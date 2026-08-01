@@ -8,8 +8,11 @@
           <div>
             <el-input v-model="keyword" placeholder="搜索 名称/方法/URL" clearable size="small" style="width:220px;margin-right:8px" />
             <el-button @click="openVariables">变量/常量</el-button>
+            <el-button @click="triggerImport" title="导入 JSON（单条对象或数组）">导入</el-button>
+            <el-button @click="exportAll" title="导出当前项目全部用例为 JSON">导出全部</el-button>
             <el-button type="primary" :icon="Plus" @click="openCreate">新建用例</el-button>
           </div>
+          <input ref="importInput" type="file" accept=".json,application/json" style="display:none" @change="onImportFile" />
         </div>
       </template>
       <el-table :data="filtered" v-loading="loading" border stripe size="small">
@@ -25,11 +28,12 @@
         <el-table-column label="模式" width="90">
           <template #default="{ row }">{{ row.mode === 'direct' ? '浏览器直发' : '后端转发' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="280">
+        <el-table-column label="操作" width="340">
           <template #default="{ row }">
             <el-button size="small" type="success" link @click="onRun(row)">运行</el-button>
             <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
             <el-button size="small" type="info" link @click="openHistory(row)">历史</el-button>
+            <el-button size="small" link @click="exportOne(row)">导出</el-button>
             <el-button size="small" type="danger" link @click="onRemove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -788,6 +792,52 @@ function fillFromListener(id) {
     messageFormat: l.messageFormat || 'json',
     formatConfig
   })
+}
+
+// 导入 / 导出（JSON）
+const importInput = ref(null)
+function sanitizeCase(c) {
+  if (!c || typeof c !== 'object') return null
+  const { id, projectId, createTime, updateTime, ...rest } = c
+  return rest
+}
+function downloadJson(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+function exportOne(row) {
+  const safe = (row.name || 'case').replace(/[^\w一-龥.-]/g, '_')
+  downloadJson(sanitizeCase(row), `testcase-${safe}.json`)
+}
+function exportAll() {
+  if (!list.value.length) { ElMessage.warning('暂无用例可导出'); return }
+  downloadJson(list.value.map(sanitizeCase).filter(Boolean), `testcases-${proj.code || proj.id || 'project'}.json`)
+  ElMessage.success('已导出 ' + list.value.length + ' 条')
+}
+function triggerImport() { if (importInput.value) importInput.value.click() }
+async function onImportFile(e) {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  try {
+    const data = JSON.parse(await file.text())
+    const arr = Array.isArray(data) ? data : [data]
+    let ok = 0, fail = 0
+    for (const c of arr) {
+      const s = sanitizeCase(c)
+      if (!s || !s.name || !s.name.trim()) { fail++; continue }
+      try { await api.testCases.create(proj.id, s); ok++ } catch (err) { fail++ }
+    }
+    ElMessage[fail ? 'warning' : 'success'](`导入完成：成功 ${ok}，失败 ${fail}`)
+    if (ok > 0) load()
+  } catch (err) {
+    ElMessage.error('导入失败：文件不是合法 JSON')
+  }
+  e.target.value = ''
 }
 
 onMounted(() => {
