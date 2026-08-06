@@ -88,6 +88,9 @@ public class MockHttpFilter implements Filter {
             ruleId = result.getRuleId();
             matched = result.isMatched();
             responseRaw = writeResponse(resp, result.getResponse());
+        } catch (BodyTooLargeException e) {
+            log.warn("Mock 请求体超过 {} 字节上限: {} {}", MAX_BODY, req.getMethod(), req.getRequestURI());
+            responseRaw = writeJsonError(resp, 413, "PAYLOAD_TOO_LARGE", "请求体超过 " + MAX_BODY + " 字节上限");
         } catch (Throwable t) {
             log.error("Mock 处理异常: {} {}", req.getMethod(), req.getRequestURI(), t);
             responseRaw = writeError(resp, t);
@@ -155,11 +158,16 @@ public class MockHttpFilter implements Filter {
     }
 
     private String writeError(HttpServletResponse resp, Throwable t) throws IOException {
+        // 不回 t.getMessage()（可能含内部细节），固定文案；详情只在服务端日志
+        return writeJsonError(resp, 500, "MOCK_INTERNAL_ERROR", "Mock 处理异常");
+    }
+
+    private String writeJsonError(HttpServletResponse resp, int status, String error, String message) throws IOException {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "MOCK_INTERNAL_ERROR");
-        body.put("message", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+        body.put("error", error);
+        body.put("message", message);
         String text = JsonUtils.toJson(body);
-        resp.setStatus(500);
+        resp.setStatus(status);
         resp.setContentType("application/json;charset=UTF-8");
         resp.setCharacterEncoding("UTF-8");
         resp.getWriter().write(text);
@@ -246,10 +254,21 @@ public class MockHttpFilter implements Filter {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         byte[] buf = new byte[4096];
         int n;
+        long total = 0;
         while ((n = is.read(buf)) != -1) {
+            total += n;
+            if (total > MAX_BODY) {
+                throw new BodyTooLargeException();
+            }
             bos.write(buf, 0, n);
         }
         return bos.toByteArray();
+    }
+
+    /** Mock 请求体上限：超过即 413，避免无鉴权端口被超大 body 打爆内存。 */
+    private static final long MAX_BODY = 1024 * 1024; // 1 MB
+
+    private static final class BodyTooLargeException extends RuntimeException {
     }
 
     private String truncate(String s) {

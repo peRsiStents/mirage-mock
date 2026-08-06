@@ -5,10 +5,15 @@
       <template #header>
         <div class="card-header">
           <span>定时任务 <el-tag size="small">{{ proj.name }}</el-tag></span>
-          <el-button type="primary" :icon="Plus" @click="openCreate">新建定时</el-button>
+          <div style="display:flex;align-items:center;gap:12px">
+            <el-tooltip content="只列出最近一次失败的任务" placement="top">
+              <span style="display:inline-flex;align-items:center;gap:4px;color:#909399;font-size:12px">只看失败<el-switch v-model="onlyFail" /></span>
+            </el-tooltip>
+            <el-button type="primary" :icon="Plus" @click="openCreate">新建定时</el-button>
+          </div>
         </div>
       </template>
-      <el-table :data="list" v-loading="loading" border stripe size="small">
+      <el-table :data="filtered" v-loading="loading" border stripe size="small" :row-class-name="rowClass">
         <template #empty>
           <el-empty description="暂无定时任务">
             <el-button type="primary" size="small" @click="openCreate">新建定时</el-button>
@@ -18,11 +23,12 @@
         <el-table-column label="场景" width="140"><template #default="{ row }">{{ scenarioName(row.scenarioId) }}</template></el-table-column>
         <el-table-column prop="cron" label="Cron" width="160" />
         <el-table-column label="启用" width="80"><template #default="{ row }"><el-switch :model-value="row.enabled === 1" @change="onToggle(row)" /></template></el-table-column>
+        <el-table-column label="下次运行" width="170"><template #default="{ row }"><span :class="{ muted: !nextRun[row.id] }">{{ nextRun[row.id] || (row.enabled === 1 ? '计算中…' : '—') }}</span></template></el-table-column>
         <el-table-column prop="lastRunTime" label="最近运行" width="170" />
-        <el-table-column label="结果" width="70"><template #default="{ row }">{{ row.lastPassed == null ? '—' : (row.lastPassed === 1 ? '✓' : '✗') }}</template></el-table-column>
+        <el-table-column label="结果" width="70"><template #default="{ row }"><el-tag v-if="row.lastPassed != null" :type="row.lastPassed === 1 ? 'success' : 'danger'" size="small">{{ row.lastPassed === 1 ? '✓' : '✗' }}</el-tag><span v-else>—</span></template></el-table-column>
         <el-table-column label="操作" width="200">
           <template #default="{ row }">
-            <el-button size="small" type="success" link @click="onRun(row)">立即运行</el-button>
+            <el-button size="small" type="success" link :loading="runLoading[row.id]" @click="onRun(row)">立即运行</el-button>
             <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
             <el-button size="small" type="danger" link @click="onRemove(row)">删除</el-button>
           </template>
@@ -42,6 +48,7 @@
           <el-input v-model="form.cron" placeholder="秒 分 时 日 月 周，如 0 */5 * * * ?（每5分钟）" @input="previewCron" />
           <div v-if="cronNexts.length" class="hint" style="margin-top:4px">下次运行：{{ cronNexts.join('、') }}</div>
           <div v-if="cronError" class="err" style="margin-top:4px">{{ cronError }}</div>
+          <div class="hint" style="margin-top:4px">Quartz 6 段：秒 分 时 日 月 周。<span class="mono">*</span>=任意，<span class="mono">*/n</span>=每 n 单位，<span class="mono">?</span>=不关心（日和周只能一个用 *，另一个用 ?）。</div>
         </el-form-item>
         <el-form-item label="环境">
           <el-select v-model="form.envId" clearable placeholder="可选">
@@ -51,7 +58,7 @@
         <el-form-item label="启用"><el-switch v-model="form.enabled" :active-value="1" :inactive-value="0" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="formVisible = false">取消</el-button><el-button type="primary" @click="onSave">保存</el-button></template>
+      <template #footer><el-button @click="formVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="onSave">保存</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="resultVisible" title="运行结果" width="860px" top="3vh">
@@ -84,7 +91,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
@@ -100,9 +107,15 @@ const formVisible = ref(false)
 const form = reactive({ id: null, name: '', scenarioId: null, cron: '0 */5 * * * ?', envId: null, enabled: 1, remark: '' })
 const resultVisible = ref(false)
 const result = ref(null)
+const onlyFail = ref(false)
+const nextRun = reactive({})
+const filtered = computed(() => (onlyFail.value ? list.value.filter((r) => r.lastPassed === 0) : list.value))
+function rowClass({ row }) { return row.lastPassed === 0 ? 'row-fail' : '' }
 
 const cronNexts = ref([])
 const cronError = ref('')
+const saving = ref(false)
+const runLoading = reactive({})
 let cronTimer = null
 async function previewCron() {
   if (cronTimer) { clearTimeout(cronTimer); cronTimer = null }
@@ -131,7 +144,21 @@ async function load() {
   try {
     const [s, sc, e] = await Promise.all([api.schedules.list(proj.id), api.scenarios.list(proj.id), api.environments.list(proj.id)])
     list.value = s.data || []; scenarios.value = sc.data || []; envs.value = e.data || []
+    refreshNextRuns()
   } finally { loading.value = false }
+}
+
+// 列表行展示「下次运行」：对启用的任务批量取 cron 下一次触发时间（任务通常不多）
+function refreshNextRuns() {
+  for (const r of list.value) {
+    if (r.enabled === 1 && r.cron) {
+      api.schedules.cronPreview(r.cron, 1)
+        .then((res) => { nextRun[r.id] = (res.data && res.data[0]) || '' })
+        .catch(() => { nextRun[r.id] = '' })
+    } else {
+      nextRun[r.id] = ''
+    }
+  }
 }
 
 function openCreate() { Object.assign(form, { id: null, name: '', scenarioId: null, cron: '0 */5 * * * ?', envId: null, enabled: 1, remark: '' }); cronNexts.value = []; cronError.value = ''; previewCron(); formVisible.value = true }
@@ -142,19 +169,29 @@ async function onSave() {
   if (!form.scenarioId) { ElMessage.warning('请选择场景'); return }
   if (!form.cron || !form.cron.trim()) { ElMessage.warning('请输入 Cron 表达式'); return }
   const p = { name: form.name, scenarioId: form.scenarioId, cron: form.cron, envId: form.envId, enabled: form.enabled, remark: form.remark }
-  if (form.id) { await api.schedules.update(form.id, p) } else { await api.schedules.create(proj.id, p) }
-  ElMessage.success('已保存'); formVisible.value = false; load()
+  saving.value = true
+  try {
+    if (form.id) { await api.schedules.update(form.id, p) } else { await api.schedules.create(proj.id, p) }
+    ElMessage.success('已保存'); formVisible.value = false; load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
+  }
 }
 
 async function onToggle(row) { await api.schedules.toggle(row.id); load() }
 async function onRun(row) {
+  runLoading[row.id] = true
   try {
     const r = await api.schedules.run(row.id)
     result.value = r.data
     resultVisible.value = true
     ElMessage.success(r.data.passed ? '✓ 通过' : '✗ 存在失败')
   } catch (e) {
-    ElMessage.error('运行失败')
+    /* 拦截器已提示 */
+  } finally {
+    runLoading[row.id] = false
   }
   load()
 }
@@ -170,4 +207,7 @@ onMounted(load)
 .step-result { border-bottom: 1px solid #f0f0f0; padding: 8px 0; }
 .line { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 12px; margin: 2px 0; }
 .sub { font-size: 12px; color: #606266; margin-top: 6px; }
+</style>
+<style>
+.el-table .row-fail { background: #fef0f0 !important; }
 </style>

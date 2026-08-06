@@ -4,10 +4,21 @@
       <template #header>
         <div class="card-header">
           <span>项目管理</span>
-          <el-button type="primary" :icon="Plus" @click="openCreate">新建项目</el-button>
+          <div>
+            <el-button :loading="sampleLoading" @click="onLoadSample" title="生成含 HTTP 接口与 Mock 规则的示例项目">载入示例</el-button>
+            <el-button type="primary" :icon="Plus" @click="openCreate">新建项目</el-button>
+          </div>
         </div>
       </template>
       <el-table :data="list" v-loading="loading" border stripe size="small">
+        <template #empty>
+          <el-empty description="还没有项目，新建一个或一键载入示例开始体验">
+            <div style="display:flex;gap:8px;justify-content:center">
+              <el-button type="primary" :icon="Plus" @click="openCreate">新建项目</el-button>
+              <el-button :loading="sampleLoading" @click="onLoadSample">一键载入示例项目</el-button>
+            </div>
+          </el-empty>
+        </template>
         <el-table-column prop="name" label="项目名称" />
         <el-table-column prop="code" label="编码" width="160" />
         <el-table-column prop="ruleVersion" label="规则版本" width="100" />
@@ -40,7 +51,7 @@
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="onSave">保存</el-button>
       </template>
     </el-dialog>
 
@@ -68,20 +79,27 @@
       </el-table>
     </el-dialog>
 
-    <el-dialog v-model="ciVisible" title="CI / 流水线接入" width="640px">
+    <el-dialog v-model="ciVisible" title="CI / 流水线接入" width="680px">
       <div v-if="ciProject">
         <div class="kv-title">CI Token（免 JWT 触发场景运行）</div>
-        <el-input :model-value="ciProject.ciToken || ''" readonly>
+        <el-input :model-value="ciProject.ciToken || '(未生成)'" readonly>
           <template #append>
             <el-button :icon="CopyDocument" @click="copyText(ciProject.ciToken || '')">复制</el-button>
           </template>
         </el-input>
-        <div class="hint">将该 token 作为 <span class="mono">token</span> 参数传入 CI 接口，即可在流水线中触发场景运行；按返回 JSON 的 <span class="mono">data.passed</span> 判定流水线成败。</div>
+        <el-alert type="warning" :closable="false" style="margin-top:8px"
+          title="Token 即该项目的运行密钥，请像密码一样保管；泄露后请在项目设置中重新生成。" />
 
-        <div class="kv-title" style="margin-top:14px">curl 示例</div>
+        <div class="kv-title" style="margin-top:14px">调用示例（推荐用请求头传 token，避免进访问日志 / referer）</div>
         <pre class="ci-curl">{{ curlExample }}</pre>
-        <el-button size="small" :icon="CopyDocument" @click="copyText(curlExample)">复制 curl</el-button>
-        <div class="hint" style="margin-top:8px"><span class="mono">{场景ID}</span> 替换为「测试场景」页目标场景 ID；<span class="mono">env</span> 可选（指定运行环境）。</div>
+        <div style="margin-top:6px">
+          <el-button size="small" :icon="CopyDocument" @click="copyText(curlExample)">复制整段</el-button>
+        </div>
+        <div class="hint" style="margin-top:8px">
+          <span class="mono">{场景ID}</span> 替换为「测试场景」页目标场景 ID；<span class="mono">env</span> 可选（指定运行环境）。
+          末行 <span class="mono">jq -e</span> 通过返回退出码 0、失败非 0，可直接接 <span class="mono">&amp;&amp;</span> / <span class="mono">||</span>。
+          运行历史见「测试报告」页；也兼容 <span class="mono">?token=xxx</span> 查询参数（旧调用，不建议）。
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -98,6 +116,8 @@ import { copyText } from '../utils/clipboard'
 const proj = useProjectStore()
 const list = ref([])
 const loading = ref(false)
+const saving = ref(false)
+const sampleLoading = ref(false)
 
 const formVisible = ref(false)
 const form = reactive({ id: null, name: '', code: '', status: 1, remark: '' })
@@ -114,7 +134,11 @@ const ciProject = ref(null)
 const curlExample = computed(() => {
   const origin = window.location.origin
   const token = ciProject.value?.ciToken || '<token>'
-  return `curl -X POST "${origin}/api/v1/ci/scenarios/{场景ID}/run?token=${token}&env={环境ID,可选}"`
+  return [
+    `curl -fsS -X POST "${origin}/api/v1/ci/scenarios/{场景ID}/run?env={环境ID,可选}" \\`,
+    `  -H "X-CI-Token: ${token}" \\`,
+    `  | jq -e '.data.passed == true'  # 通过退出码 0，失败非 0`
+  ].join('\n')
 })
 function openCi(row) {
   ciProject.value = row
@@ -144,14 +168,21 @@ function openEdit(row) {
 async function onSave() {
   if (!form.name || !form.name.trim()) { ElMessage.warning('请输入项目名称'); return }
   if (!form.id && (!form.code || !form.code.trim())) { ElMessage.warning('请输入项目编码 code'); return }
-  if (form.id) {
-    await api.projects.update(form.id, { name: form.name, status: form.status, remark: form.remark })
-  } else {
-    await api.projects.create({ name: form.name, code: form.code, status: form.status, remark: form.remark })
+  saving.value = true
+  try {
+    if (form.id) {
+      await api.projects.update(form.id, { name: form.name, status: form.status, remark: form.remark })
+    } else {
+      await api.projects.create({ name: form.name, code: form.code, status: form.status, remark: form.remark })
+    }
+    ElMessage.success('已保存')
+    formVisible.value = false
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
   }
-  ElMessage.success('已保存')
-  formVisible.value = false
-  load()
 }
 
 async function onRemove(row) {
@@ -164,6 +195,19 @@ async function onRemove(row) {
 function useProject(row) {
   proj.select(row)
   ElMessage.success(`已切换到项目：${row.name}`)
+}
+
+async function onLoadSample() {
+  sampleLoading.value = true
+  try {
+    const res = await api.projects.createSample()
+    ElMessage.success('已生成示例项目：' + (res.data?.name || '示例项目') + '，含 2 个接口与若干 Mock 规则')
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    sampleLoading.value = false
+  }
 }
 
 async function openMembers(row) {

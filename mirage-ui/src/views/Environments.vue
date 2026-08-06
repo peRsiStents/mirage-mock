@@ -42,7 +42,7 @@
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="onSave">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -58,6 +58,7 @@ import { useProjectStore } from '../store/project'
 const proj = useProjectStore()
 const list = ref([])
 const loading = ref(false)
+const saving = ref(false)
 const formVisible = ref(false)
 const form = reactive({ id: null, name: '', baseUrl: '', status: 1 })
 const vars = ref([])
@@ -85,8 +86,15 @@ function openEdit(row) {
 async function onSave() {
   if (!form.name || !form.name.trim()) { ElMessage.warning('请输入环境名称'); return }
   const payload = { name: form.name, baseUrl: form.baseUrl, status: form.status, variables: JSON.stringify(vars.value.filter((v) => v.name)) }
-  if (form.id) { await api.environments.update(form.id, payload) } else { await api.environments.create(proj.id, payload) }
-  ElMessage.success('已保存'); formVisible.value = false; load()
+  saving.value = true
+  try {
+    if (form.id) { await api.environments.update(form.id, payload) } else { await api.environments.create(proj.id, payload) }
+    ElMessage.success('已保存'); formVisible.value = false; load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
+  }
 }
 
 async function onRemove(row) {

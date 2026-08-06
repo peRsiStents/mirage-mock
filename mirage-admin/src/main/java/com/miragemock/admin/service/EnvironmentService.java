@@ -6,6 +6,7 @@ import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.TestEnvironment;
 import com.miragemock.common.exception.BizException;
+import com.miragemock.admin.security.ProjectAuthz;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,10 +20,12 @@ import java.util.List;
 public class EnvironmentService {
 
     private final TestEnvironmentMapper envMapper;
+    private final ProjectAuthz authz;
 
     @Autowired
-    public EnvironmentService(TestEnvironmentMapper envMapper) {
+    public EnvironmentService(TestEnvironmentMapper envMapper, ProjectAuthz authz) {
         this.envMapper = envMapper;
+        this.authz = authz;
     }
 
     public List<TestEnvironment> list(Long projectId) {
@@ -36,6 +39,7 @@ public class EnvironmentService {
         if (e == null) {
             throw new BizException(ResultCode.NOT_FOUND, "环境不存在");
         }
+        authz.requireMember(e.getProjectId());
         return e;
     }
 

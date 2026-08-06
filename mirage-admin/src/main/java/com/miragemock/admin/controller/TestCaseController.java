@@ -39,6 +39,12 @@ public class TestCaseController {
         return Result.ok(service.list(pid));
     }
 
+    /** 用例详情：列表已瘦身，编辑/运行/导出按需懒加载全量大字段。 */
+    @GetMapping("/testcases/{id}")
+    public Result<TestCase> get(@PathVariable Long id) {
+        return Result.ok(service.get(id));
+    }
+
     @PostMapping("/projects/{pid}/testcases")
     public Result<TestCase> create(@PathVariable Long pid, @RequestBody TestCase t) {
         t.setProjectId(pid);
@@ -53,6 +59,12 @@ public class TestCaseController {
     @DeleteMapping("/testcases/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         service.delete(id);
+        return Result.ok();
+    }
+
+    @DeleteMapping("/testcases/batch")
+    public Result<Void> deleteBatch(@RequestBody List<Long> ids) {
+        service.deleteBatch(ids);
         return Result.ok();
     }
 

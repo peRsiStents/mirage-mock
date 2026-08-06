@@ -29,11 +29,19 @@ public class LogController {
             @PathVariable Long pid,
             @RequestParam(required = false) Long interfaceId,
             @RequestParam(required = false) Integer matched,
+            @RequestParam(required = false) String protocol,
+            @RequestParam(required = false) String keyword,
             @RequestParam(required = false) Long from,
             @RequestParam(required = false) Long to,
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "20") long size) {
-        return Result.ok(logService.query(pid, interfaceId, matched, from, to, page, size));
+        return Result.ok(logService.query(pid, interfaceId, matched, protocol, keyword, from, to, page, size));
+    }
+
+    /** 单条日志完整原文（详情懒加载）。 */
+    @GetMapping("/{logId}")
+    public Result<MockRequestLog> get(@PathVariable Long pid, @PathVariable Long logId) {
+        return Result.ok(logService.get(logId));
     }
 
     /** 将一条请求日志解析为「未保存」的测试用例草稿（前端打开编辑、复核后再保存）。 */

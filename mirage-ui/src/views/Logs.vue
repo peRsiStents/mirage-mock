@@ -3,21 +3,29 @@
     <el-card v-if="!proj.id"><el-empty description="请先在顶部选择一个项目" /></el-card>
     <el-card v-else>
       <template #header>
-        <div class="card-header"><span>请求日志 <el-tag size="small">{{ proj.name }}</el-tag></span></div>
+        <div class="card-header">
+          <span>请求日志 <el-tag size="small">{{ proj.name }}</el-tag></span>
+          <span class="retention-hint">日志保留 7 天，每日 03:00 自动清理过期记录</span>
+        </div>
       </template>
       <div class="filters">
         <el-select v-model="filters.interfaceId" placeholder="接口" style="width: 200px" clearable filterable>
           <el-option v-for="it in interfaces" :key="it.id" :label="it.name" :value="it.id" />
         </el-select>
+        <el-select v-model="filters.protocol" placeholder="协议" style="width: 100px" clearable>
+          <el-option label="HTTP" value="HTTP" /><el-option label="TCP" value="TCP" />
+        </el-select>
         <el-select v-model="filters.matched" placeholder="命中" style="width: 110px" clearable>
           <el-option label="命中" :value="1" /><el-option label="未命中" :value="0" />
         </el-select>
+        <el-input v-model="filters.keyword" placeholder="关键字（路径/请求体）" clearable style="width: 200px" @keyup.enter="load" />
         <el-date-picker v-model="filters.from" type="datetime" placeholder="开始时间" value-format="x" format="YYYY-MM-DD HH:mm:ss" style="width: 200px" />
         <el-date-picker v-model="filters.to" type="datetime" placeholder="结束时间" value-format="x" format="YYYY-MM-DD HH:mm:ss" style="width: 200px" />
         <el-button type="primary" @click="load">查询</el-button>
+        <el-button @click="resetFilters">重置</el-button>
       </div>
       <el-table :data="logs" v-loading="loading" border size="small" :row-class-name="rowClass" style="margin-top: 12px">
-        <el-table-column prop="createTime" label="时间" width="170" />
+        <el-table-column prop="createTime" label="时间" width="170" sortable />
         <el-table-column prop="protocol" label="协议" width="70" />
         <el-table-column prop="clientAddr" label="来源" width="140" />
         <el-table-column label="命中" width="80">
@@ -34,7 +42,7 @@
         <el-table-column label="规则" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.ruleName || (row.ruleId ? '#' + row.ruleId : '—') }}</template>
         </el-table-column>
-        <el-table-column prop="costMs" label="耗时ms" width="90" />
+        <el-table-column prop="costMs" label="耗时ms" width="90" sortable />
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button size="small" link @click="showDetail(row)">详情</el-button>
@@ -76,7 +84,7 @@ const proj = useProjectStore()
 const draftStore = useTestCaseDraftStore()
 const logs = ref([])
 const loading = ref(false)
-const filters = reactive({ interfaceId: '', matched: null, from: null, to: null })
+const filters = reactive({ interfaceId: '', protocol: '', matched: null, keyword: '', from: null, to: null })
 const page = reactive({ current: 1, size: 20, total: 0 })
 
 const detailVisible = ref(false)
@@ -106,7 +114,9 @@ async function load() {
       size: page.size
     }
     if (filters.interfaceId) params.interfaceId = filters.interfaceId
+    if (filters.protocol) params.protocol = filters.protocol
     if (filters.matched !== null && filters.matched !== '') params.matched = filters.matched
+    if (filters.keyword) params.keyword = filters.keyword
     if (filters.from) params.from = Number(filters.from)
     if (filters.to) params.to = Number(filters.to)
     const res = await api.logs.query(proj.id, params)
@@ -117,9 +127,21 @@ async function load() {
   }
 }
 
-function showDetail(row) {
-  detail.value = row
+function resetFilters() {
+  Object.assign(filters, { interfaceId: '', protocol: '', matched: null, keyword: '', from: null, to: null })
+  page.current = 1
+  load()
+}
+
+async function showDetail(row) {
   detailVisible.value = true
+  detail.value = { ...row, requestRaw: '加载中...', requestParsed: '', responseRaw: '' }
+  try {
+    const res = await api.logs.get(proj.id, row.id)
+    detail.value = res.data || row
+  } catch (e) {
+    detail.value = row
+  }
 }
 
 async function toCase(row) {
@@ -133,12 +155,13 @@ async function toCase(row) {
   }
 }
 
-watch(() => proj.id, () => { load(); loadInterfaces() })
+watch(() => proj.id, () => { page.current = 1; load(); loadInterfaces() })
 onMounted(() => { load(); loadInterfaces() })
 </script>
 
 <style scoped>
 .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.retention-hint { color: #909399; font-size: 12px; }
 .raw {
   background: #f5f7fa; padding: 12px; border-radius: 4px; max-height: 420px; overflow: auto;
   font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;

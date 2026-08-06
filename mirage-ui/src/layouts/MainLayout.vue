@@ -1,17 +1,17 @@
 <template>
   <el-container style="height: 100vh">
-    <el-aside width="210px" style="background: #001529">
+    <el-aside :width="collapsed ? '64px' : '210px'" class="sidebar">
       <div class="logo">
         <img :src="logoLight" class="logo-img" alt="蜃楼" />
-        <span class="logo-text">蜃楼</span>
+        <span v-show="!collapsed" class="logo-text">蜃楼</span>
       </div>
-      <el-menu :default-active="route.path" :router="true" :default-openeds="openedGroups" background-color="#001529" text-color="#cfd8e3" active-text-color="#409eff">
+      <el-menu :default-active="route.path" :router="true" :default-openeds="openedGroups" :collapse="collapsed" background-color="#001529" text-color="#cfd8e3" active-text-color="#409eff">
         <template v-for="g in visibleGroups" :key="g.title">
           <el-menu-item v-if="g.items.length === 1" :index="g.items[0].path">
             <el-icon><component :is="g.items[0].icon" /></el-icon><span>{{ g.items[0].label }}</span>
           </el-menu-item>
           <el-sub-menu v-else :index="g.title">
-            <template #title><el-icon><FolderOpened /></el-icon><span>{{ g.title }}</span></template>
+            <template #title><el-icon><component :is="g.icon" /></el-icon><span>{{ g.title }}</span></template>
             <el-menu-item v-for="it in g.items" :key="it.path" :index="it.path">
               <el-icon><component :is="it.icon" /></el-icon><span>{{ it.label }}</span>
             </el-menu-item>
@@ -21,12 +21,17 @@
     </el-aside>
     <el-container>
       <el-header class="topbar">
-        <el-breadcrumb class="crumb" separator="/" v-if="current">
-          <el-breadcrumb-item v-if="current.group !== current.label">{{ current.group }}</el-breadcrumb-item>
-          <el-breadcrumb-item><b>{{ current.label }}</b></el-breadcrumb-item>
-        </el-breadcrumb>
+        <div class="topbar-left">
+          <el-button class="collapse-btn" link @click="collapsed = !collapsed" :title="collapsed ? '展开菜单' : '收起菜单'">
+            <el-icon :size="20"><component :is="collapsed ? 'Expand' : 'Fold'" /></el-icon>
+          </el-button>
+          <el-breadcrumb class="crumb" separator="/" v-if="current">
+            <el-breadcrumb-item v-if="current.group !== current.label">{{ current.group }}</el-breadcrumb-item>
+            <el-breadcrumb-item><b>{{ current.label }}</b></el-breadcrumb-item>
+          </el-breadcrumb>
+        </div>
         <div class="topbar-right">
-          <div class="project-sel">
+          <div class="project-sel" v-if="showProjectSwitcher">
             <span class="label">当前项目：</span>
             <el-select v-model="projId" placeholder="请选择项目" style="width: 240px" @change="onProjectChange">
               <el-option v-for="p in projects" :key="p.id" :label="p.name + ' (' + p.code + ')'" :value="p.id" />
@@ -65,33 +70,46 @@ const proj = useProjectStore()
 
 const projects = ref([])
 const projId = ref(proj.id || null)
+// 侧栏折叠（图标导航），记忆到 localStorage
+const collapsed = ref(localStorage.getItem('mirage_sidebar_collapsed') === '1')
+watch(collapsed, (v) => localStorage.setItem('mirage_sidebar_collapsed', v ? '1' : '0'))
 
 // 数据驱动的分组菜单（同时用于面包屑）；单元素组平铺，多元素组用 el-sub-menu
 const menuGroups = [
-  { title: '项目管理', items: [{ path: '/projects', icon: 'Files', label: '项目管理' }] },
-  { title: 'Mock 配置', items: [
+  { title: '工作台', icon: 'Odometer', items: [{ path: '/dashboard', icon: 'Odometer', label: '工作台' }] },
+  { title: '项目管理', icon: 'Files', items: [{ path: '/projects', icon: 'Files', label: '项目管理' }] },
+  { title: 'Mock 配置', icon: 'Connection', items: [
     { path: '/interfaces', icon: 'Connection', label: 'HTTP 接口' },
     { path: '/listeners', icon: 'Operation', label: 'TCP 监听' },
     { path: '/keys', icon: 'Key', label: '密钥管理' },
     { path: '/logs', icon: 'Document', label: '请求日志' }
   ] },
-  { title: '测试平台', items: [
+  { title: '测试平台', icon: 'Promotion', items: [
     { path: '/testcases', icon: 'Promotion', label: '测试用例' },
     { path: '/scenarios', icon: 'Share', label: '测试场景' },
     { path: '/environments', icon: 'Place', label: '环境管理' },
     { path: '/reports', icon: 'DataAnalysis', label: '测试报告' },
     { path: '/schedules', icon: 'AlarmClock', label: '定时任务' }
   ] },
-  { title: '工具与生成', items: [
-    { path: '/functions', icon: 'Grid', label: '函数市场' },
-    { path: '/tools', icon: 'Tools', label: '工具市场' },
+  { title: '辅助工具', icon: 'Briefcase', items: [
+    { path: '/functions', icon: 'Grid', label: '函数库' },
+    { path: '/tools', icon: 'Tools', label: '工具集' },
     { path: '/file-gen', icon: 'DocumentCopy', label: '文件生成' }
   ] },
-  { title: '系统', admin: true, items: [{ path: '/users', icon: 'User', label: '用户管理' }] }
+  { title: '系统', icon: 'Setting', admin: true, items: [{ path: '/users', icon: 'User', label: '用户管理' }] }
 ]
 const visibleGroups = computed(() => menuGroups.filter((g) => !g.admin || auth.isAdmin))
-// 默认展开所有分组，行为等价于原来的扁平菜单
-const openedGroups = computed(() => visibleGroups.value.filter((g) => g.items.length > 1).map((g) => g.title))
+// 仅展开当前路由所在分组，降低首屏认知负载
+const activeGroupTitle = computed(() => {
+  for (const g of visibleGroups.value) {
+    if (g.items.some((i) => i.path === route.path)) return g.title
+  }
+  return null
+})
+const openedGroups = computed(() => (activeGroupTitle.value ? [activeGroupTitle.value] : []))
+// 这些页面与项目无关或本身是跨项目管理，隐藏顶部项目切换器以免语义冲突
+const NON_PROJECT_PAGES = ['/projects', '/functions', '/tools', '/users']
+const showProjectSwitcher = computed(() => !NON_PROJECT_PAGES.includes(route.path))
 const current = computed(() => {
   for (const g of menuGroups) {
     const it = g.items.find((i) => i.path === route.path)
@@ -124,10 +142,21 @@ function onUserCmd(cmd) {
 }
 
 onMounted(loadProjects)
-watch(() => proj.id, (v) => { projId.value = v })
+watch(() => proj.id, (v) => {
+  projId.value = v
+  // 切换项目（无路由跳转）时同步浏览器标题
+  const t = route.meta?.title
+  const parts = [t, proj.name].filter(Boolean)
+  document.title = (parts.length ? parts.join(' · ') + ' · ' : '') + '蜃楼 Mock'
+})
 </script>
 
 <style scoped>
+.sidebar {
+  background: #001529;
+  transition: width 0.2s ease;
+  overflow-x: hidden;
+}
 .logo {
   height: 56px;
   display: flex;
@@ -135,6 +164,7 @@ watch(() => proj.id, (v) => { projId.value = v })
   align-items: center;
   justify-content: center;
   gap: 8px;
+  overflow: hidden;
 }
 .logo-img {
   height: 32px;
@@ -144,6 +174,7 @@ watch(() => proj.id, (v) => { projId.value = v })
   font-size: 18px;
   font-weight: 600;
   letter-spacing: 2px;
+  white-space: nowrap;
 }
 .topbar {
   display: flex;
@@ -151,6 +182,15 @@ watch(() => proj.id, (v) => { projId.value = v })
   justify-content: space-between;
   border-bottom: 1px solid #ebeef5;
   background: #fff;
+}
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.collapse-btn {
+  padding: 0;
+  color: #606266;
 }
 .topbar-right {
   display: flex;

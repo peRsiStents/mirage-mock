@@ -41,7 +41,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Throwable.class)
     public ResponseEntity<Result<Void>> other(Throwable e) {
         log.error("未处理异常", e);
+        // 不把原始 message（可能含表名/SQL/堆栈）回前端，避免信息泄露
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Result.fail(ResultCode.SERVER_ERROR, e.getMessage()));
+                .body(Result.fail(ResultCode.SERVER_ERROR, "服务器内部错误，请查看服务端日志"));
     }
 }

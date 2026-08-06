@@ -1,8 +1,10 @@
 package com.miragemock.admin.controller;
 
+import com.miragemock.admin.service.KeyService;
 import com.miragemock.admin.service.ToolService;
 import com.miragemock.common.api.Result;
 import com.miragemock.common.api.ResultCode;
+import com.miragemock.common.entity.SecretKey;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,16 +15,19 @@ import java.util.function.Supplier;
 
 /**
  * 工具市场：测试人员的即时小工具（格式化 + 国密/RSA 加解密签名）。
- * 所有接口无状态、不落库；密钥由请求体直接传入。
+ * 所有接口无状态、不落库；密钥由请求体直接传入，或通过 keyId 引用项目密钥
+ * （私钥在服务端解析、不回前端）。
  */
 @RestController
 @RequestMapping("/api/v1/tools")
 public class ToolController {
 
     private final ToolService svc;
+    private final KeyService keyService;
 
-    public ToolController(ToolService svc) {
+    public ToolController(ToolService svc, KeyService keyService) {
         this.svc = svc;
+        this.keyService = keyService;
     }
 
     /** 统一包装：提取根因消息，避免把堆栈/通用 500 暴露给前端。 */
@@ -41,6 +46,33 @@ public class ToolController {
 
     private String g(Map<String, String> b, String k) {
         return b.get(k);
+    }
+
+    private static boolean notEmpty(String s) {
+        return s != null && !s.trim().isEmpty();
+    }
+
+    /** 请求体携带 keyId 时，按 id 解析项目密钥（含解密私钥/对称密钥）；否则返回 null。 */
+    private SecretKey resolveKey(Map<String, String> b) {
+        String id = b.get("keyId");
+        if (id == null || id.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return keyService.resolveForTool(Long.parseLong(id.trim()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 引用密钥时优先用密钥里的公钥，否则用请求体里粘贴的。 */
+    private String pubOr(Map<String, String> b, SecretKey k) {
+        return (k != null && notEmpty(k.getPublicKey())) ? k.getPublicKey() : g(b, "pub");
+    }
+
+    /** 引用密钥时优先用密钥里解密后的私钥，否则用请求体里粘贴的。 */
+    private String privOr(Map<String, String> b, SecretKey k) {
+        return (k != null && notEmpty(k.getPrivateKey())) ? k.getPrivateKey() : g(b, "priv");
     }
 
     // ===================== JSON =====================
@@ -177,14 +209,33 @@ public class ToolController {
 
     @PostMapping("/sm4/encrypt")
     public Result<String> sm4Encrypt(@RequestBody Map<String, String> b) {
-        return run(() -> svc.sm4Encrypt(g(b, "text"), g(b, "key"), g(b, "iv"),
-                g(b, "mode"), g(b, "keyEnc"), g(b, "outEnc")));
+        SecretKey k = resolveKey(b);
+        String key, iv, keyEnc;
+        if (k != null && notEmpty(k.getPrivateKey())) {
+            // 引用项目密钥：对称密钥/IV 落库为 Base64，固定按 Base64 解码
+            key = k.getPrivateKey();
+            iv = notEmpty(k.getIvValue()) ? k.getIvValue() : g(b, "iv");
+            keyEnc = "base64";
+        } else {
+            key = g(b, "key"); iv = g(b, "iv"); keyEnc = g(b, "keyEnc");
+        }
+        final String fKey = key, fIv = iv, fKeyEnc = keyEnc;
+        return run(() -> svc.sm4Encrypt(g(b, "text"), fKey, fIv, g(b, "mode"), fKeyEnc, g(b, "outEnc")));
     }
 
     @PostMapping("/sm4/decrypt")
     public Result<String> sm4Decrypt(@RequestBody Map<String, String> b) {
-        return run(() -> svc.sm4Decrypt(g(b, "text"), g(b, "key"), g(b, "iv"),
-                g(b, "mode"), g(b, "keyEnc"), g(b, "inEnc")));
+        SecretKey k = resolveKey(b);
+        String key, iv, keyEnc;
+        if (k != null && notEmpty(k.getPrivateKey())) {
+            key = k.getPrivateKey();
+            iv = notEmpty(k.getIvValue()) ? k.getIvValue() : g(b, "iv");
+            keyEnc = "base64";
+        } else {
+            key = g(b, "key"); iv = g(b, "iv"); keyEnc = g(b, "keyEnc");
+        }
+        final String fKey = key, fIv = iv, fKeyEnc = keyEnc;
+        return run(() -> svc.sm4Decrypt(g(b, "text"), fKey, fIv, g(b, "mode"), fKeyEnc, g(b, "inEnc")));
     }
 
     @PostMapping("/sm4/key")
@@ -196,22 +247,30 @@ public class ToolController {
 
     @PostMapping("/sm2/encrypt")
     public Result<String> sm2Encrypt(@RequestBody Map<String, String> b) {
-        return run(() -> svc.sm2Encrypt(g(b, "text"), g(b, "pub"), g(b, "outEnc")));
+        SecretKey k = resolveKey(b);
+        String pub = pubOr(b, k);
+        return run(() -> svc.sm2Encrypt(g(b, "text"), pub, g(b, "outEnc")));
     }
 
     @PostMapping("/sm2/decrypt")
     public Result<String> sm2Decrypt(@RequestBody Map<String, String> b) {
-        return run(() -> svc.sm2Decrypt(g(b, "text"), g(b, "priv"), g(b, "inEnc")));
+        SecretKey k = resolveKey(b);
+        String priv = privOr(b, k);
+        return run(() -> svc.sm2Decrypt(g(b, "text"), priv, g(b, "inEnc")));
     }
 
     @PostMapping("/sm2/sign")
     public Result<String> sm2Sign(@RequestBody Map<String, String> b) {
-        return run(() -> svc.sm2Sign(g(b, "text"), g(b, "priv"), g(b, "outEnc")));
+        SecretKey k = resolveKey(b);
+        String priv = privOr(b, k);
+        return run(() -> svc.sm2Sign(g(b, "text"), priv, g(b, "outEnc")));
     }
 
     @PostMapping("/sm2/verify")
     public Result<Boolean> sm2Verify(@RequestBody Map<String, String> b) {
-        return run(() -> svc.sm2Verify(g(b, "text"), g(b, "sig"), g(b, "pub"), g(b, "inEnc")));
+        SecretKey k = resolveKey(b);
+        String pub = pubOr(b, k);
+        return run(() -> svc.sm2Verify(g(b, "text"), g(b, "sig"), pub, g(b, "inEnc")));
     }
 
     @PostMapping("/sm2/keypair")
@@ -223,22 +282,30 @@ public class ToolController {
 
     @PostMapping("/rsa/encrypt")
     public Result<String> rsaEncrypt(@RequestBody Map<String, String> b) {
-        return run(() -> svc.rsaEncrypt(g(b, "text"), g(b, "pub")));
+        SecretKey k = resolveKey(b);
+        String pub = pubOr(b, k);
+        return run(() -> svc.rsaEncrypt(g(b, "text"), pub));
     }
 
     @PostMapping("/rsa/decrypt")
     public Result<String> rsaDecrypt(@RequestBody Map<String, String> b) {
-        return run(() -> svc.rsaDecrypt(g(b, "text"), g(b, "priv")));
+        SecretKey k = resolveKey(b);
+        String priv = privOr(b, k);
+        return run(() -> svc.rsaDecrypt(g(b, "text"), priv));
     }
 
     @PostMapping("/rsa/sign")
     public Result<String> rsaSign(@RequestBody Map<String, String> b) {
-        return run(() -> svc.rsaSign(g(b, "text"), g(b, "priv")));
+        SecretKey k = resolveKey(b);
+        String priv = privOr(b, k);
+        return run(() -> svc.rsaSign(g(b, "text"), priv));
     }
 
     @PostMapping("/rsa/verify")
     public Result<Boolean> rsaVerify(@RequestBody Map<String, String> b) {
-        return run(() -> svc.rsaVerify(g(b, "text"), g(b, "sig"), g(b, "pub")));
+        SecretKey k = resolveKey(b);
+        String pub = pubOr(b, k);
+        return run(() -> svc.rsaVerify(g(b, "text"), g(b, "sig"), pub));
     }
 
     @PostMapping("/rsa/keypair")

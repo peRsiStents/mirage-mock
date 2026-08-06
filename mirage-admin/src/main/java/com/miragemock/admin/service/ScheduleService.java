@@ -8,6 +8,7 @@ import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.TestSchedule;
 import com.miragemock.common.exception.BizException;
+import com.miragemock.admin.security.ProjectAuthz;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.scheduling.support.CronTrigger;
@@ -25,13 +26,15 @@ public class ScheduleService {
     private final TestScheduleMapper scheduleMapper;
     private final ScheduleManager scheduleManager;
     private final ScenarioService scenarioService;
+    private final ProjectAuthz authz;
 
     @Autowired
     public ScheduleService(TestScheduleMapper scheduleMapper, ScheduleManager scheduleManager,
-                           ScenarioService scenarioService) {
+                           ScenarioService scenarioService, ProjectAuthz authz) {
         this.scheduleMapper = scheduleMapper;
         this.scheduleManager = scheduleManager;
         this.scenarioService = scenarioService;
+        this.authz = authz;
     }
 
     public List<TestSchedule> list(Long projectId) {
@@ -45,6 +48,7 @@ public class ScheduleService {
         if (s == null) {
             throw new BizException(ResultCode.NOT_FOUND, "定时任务不存在");
         }
+        authz.requireMember(s.getProjectId());
         return s;
     }
 

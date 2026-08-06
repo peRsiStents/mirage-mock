@@ -11,6 +11,7 @@ import com.miragemock.common.entity.MockRule;
 import com.miragemock.common.entity.TcpListener;
 import com.miragemock.common.exception.BizException;
 import com.miragemock.tcp.TcpServerManager;
+import com.miragemock.admin.security.ProjectAuthz;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,14 +25,16 @@ public class TcpListenerService {
     private final ApiInterfaceMapper interfaceMapper;
     private final MockRuleMapper ruleMapper;
     private final TcpServerManager serverManager;
+    private final ProjectAuthz authz;
 
     @Autowired
     public TcpListenerService(TcpListenerMapper listenerMapper, ApiInterfaceMapper interfaceMapper,
-                              MockRuleMapper ruleMapper, TcpServerManager serverManager) {
+                              MockRuleMapper ruleMapper, TcpServerManager serverManager, ProjectAuthz authz) {
         this.listenerMapper = listenerMapper;
         this.interfaceMapper = interfaceMapper;
         this.ruleMapper = ruleMapper;
         this.serverManager = serverManager;
+        this.authz = authz;
     }
 
     public List<TcpListener> list(Long projectId) {
@@ -45,6 +48,7 @@ public class TcpListenerService {
         if (l == null) {
             throw new BizException(ResultCode.NOT_FOUND, "TCP 监听器不存在");
         }
+        authz.requireMember(l.getProjectId());
         return l;
     }
 

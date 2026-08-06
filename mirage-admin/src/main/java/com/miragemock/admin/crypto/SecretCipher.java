@@ -1,8 +1,10 @@
 package com.miragemock.admin.crypto;
 
 import com.miragemock.admin.security.SecurityProperties;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
@@ -10,6 +12,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.Base64;
 
 /**
@@ -21,12 +24,27 @@ public class SecretCipher {
 
     private static final int IV_LEN = 12;
     private static final int TAG_LEN_BITS = 128;
+    private static final String DEFAULT_MASTER_KEY = "mirage-mock-dev-master-key";
 
     private final SecretKey key;
     private final SecureRandom random = new SecureRandom();
+    private final Environment env;
+    private final String masterKey;
 
-    public SecretCipher(SecurityProperties props) {
-        this.key = new SecretKeySpec(sha256(props.getMasterKey()), "AES");
+    public SecretCipher(SecurityProperties props, Environment env) {
+        this.masterKey = props.getMasterKey();
+        this.key = new SecretKeySpec(sha256(this.masterKey), "AES");
+        this.env = env;
+    }
+
+    /** 生产环境强制要求高强度、非默认主密钥，fail-fast 避免零熵加密。 */
+    @PostConstruct
+    public void validateMasterKey() {
+        boolean prod = Arrays.asList(env.getActiveProfiles()).contains("prod");
+        if (prod && (DEFAULT_MASTER_KEY.equals(masterKey) || masterKey == null || masterKey.length() < 32)) {
+            throw new IllegalStateException(
+                    "生产环境(prod)必须通过环境变量 MIRAGE_MASTER_KEY 设置高强度主密钥(>=32 字符)且不可使用默认值");
+        }
     }
 
     public String encrypt(String plain) {

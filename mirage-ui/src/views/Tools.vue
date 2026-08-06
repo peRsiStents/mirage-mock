@@ -5,7 +5,7 @@
         <div class="card-header">
           <div>
             <span>工具市场 · 测试常用小工具</span>
-            <span class="hint">格式化 / 国密(RSA) 加解密签名，密钥请直接粘贴；与「函数市场」表达式同一套后端实现</span>
+            <span class="hint">格式化 / 国密(RSA) 加解密签名；可直接粘贴密钥，或在 SM2/SM4/RSA 标签「引用密钥」选项目密钥（私钥服务端解析、不回前端）</span>
           </div>
           <el-button size="small" @click="copyCurrentOut">复制结果</el-button>
         </div>
@@ -175,13 +175,22 @@
         <el-tab-pane label="SM4" name="sm4">
           <div class="cfg">
             <div class="row">
+              <span class="label">引用密钥</span>
+              <el-select v-model="sm4KeyId" clearable filterable size="small" style="width:260px" placeholder="选项目 SM4 密钥（密钥/IV 走 Base64）">
+                <el-option v-for="k in sm4Keys" :key="k.id" :label="k.alias" :value="k.id" />
+              </el-select>
+              <span v-if="sm4KeyId" class="muted">已引用：密钥/IV 由服务端从密钥取</span>
+              <span v-else-if="!proj.id" class="muted">请先选择项目</span>
+              <span v-else-if="!sm4Keys.length" class="muted">本项目暂无 SM4 密钥</span>
+            </div>
+            <div class="row">
               <span class="label">密钥(16字节)</span>
-              <el-input v-model="sm4Key" size="small" style="width:320px" placeholder="密钥内容"></el-input>
+              <el-input v-model="sm4Key" size="small" :disabled="!!sm4KeyId" style="width:320px" placeholder="密钥内容"></el-input>
               <span class="label">密钥格式</span>
-              <el-select v-model="sm4KeyEnc" size="small" style="width:110px">
+              <el-select v-model="sm4KeyEnc" size="small" :disabled="!!sm4KeyId" style="width:110px">
                 <el-option label="UTF-8" value="utf8" /><el-option label="Hex" value="hex" /><el-option label="Base64" value="base64" />
               </el-select>
-              <el-button size="small" @click="genSm4Key">生成密钥</el-button>
+              <el-button size="small" :disabled="!!sm4KeyId" @click="genSm4Key">生成密钥</el-button>
             </div>
             <div class="row">
               <span class="label">模式</span>
@@ -190,7 +199,7 @@
               </el-radio-group>
               <template v-if="sm4Mode === 'CBC'">
                 <span class="label">IV</span>
-                <el-input v-model="sm4Iv" size="small" style="width:240px" placeholder="CBC 需要 IV"></el-input>
+                <el-input v-model="sm4Iv" size="small" :disabled="!!sm4KeyId" style="width:240px" placeholder="CBC 需要 IV"></el-input>
               </template>
               <span class="label">密文编码</span>
               <el-radio-group v-model="sm4Enc" size="small">
@@ -213,12 +222,21 @@
         <el-tab-pane label="SM2" name="sm2">
           <div class="cfg">
             <div class="row">
+              <span class="label">引用密钥</span>
+              <el-select v-model="sm2KeyId" clearable filterable size="small" style="width:260px" placeholder="选项目 SM2 密钥，免粘贴">
+                <el-option v-for="k in sm2Keys" :key="k.id" :label="k.alias" :value="k.id" />
+              </el-select>
+              <span v-if="sm2KeyId" class="muted">已引用：公/私钥由服务端从密钥取</span>
+              <span v-else-if="!proj.id" class="muted">请先选择项目</span>
+              <span v-else-if="!sm2Keys.length" class="muted">本项目暂无 SM2 密钥</span>
+            </div>
+            <div class="row">
               <span class="label">公钥(Base64)</span>
-              <el-input v-model="sm2Pub" size="small" style="width:420px" placeholder="65 字节未压缩公钥的 Base64"></el-input>
+              <el-input v-model="sm2Pub" size="small" :disabled="!!sm2KeyId" style="width:420px" placeholder="65 字节未压缩公钥的 Base64"></el-input>
             </div>
             <div class="row">
               <span class="label">私钥(Base64)</span>
-              <el-input v-model="sm2Priv" size="small" style="width:420px" placeholder="32 字节私钥的 Base64"></el-input>
+              <el-input v-model="sm2Priv" size="small" :disabled="!!sm2KeyId" style="width:420px" placeholder="32 字节私钥的 Base64"></el-input>
               <span class="label">签名(Base64/Hex)</span>
               <el-input v-model="sm2Sig" size="small" style="width:280px" placeholder="验签时填"></el-input>
             </div>
@@ -249,12 +267,21 @@
         <el-tab-pane label="RSA" name="rsa">
           <div class="cfg">
             <div class="row">
+              <span class="label">引用密钥</span>
+              <el-select v-model="rsaKeyId" clearable filterable size="small" style="width:260px" placeholder="选项目 RSA 密钥，免粘贴">
+                <el-option v-for="k in rsaKeys" :key="k.id" :label="k.alias" :value="k.id" />
+              </el-select>
+              <span v-if="rsaKeyId" class="muted">已引用：公/私钥由服务端从密钥取</span>
+              <span v-else-if="!proj.id" class="muted">请先选择项目</span>
+              <span v-else-if="!rsaKeys.length" class="muted">本项目暂无 RSA 密钥</span>
+            </div>
+            <div class="row">
               <span class="label">公钥</span>
-              <el-input v-model="rsaPub" type="textarea" :rows="2" size="small" style="width:560px" placeholder="X509 Base64 或 PEM（-----BEGIN PUBLIC KEY-----）"></el-input>
+              <el-input v-model="rsaPub" type="textarea" :rows="2" :disabled="!!rsaKeyId" size="small" style="width:560px" placeholder="X509 Base64 或 PEM（-----BEGIN PUBLIC KEY-----）"></el-input>
             </div>
             <div class="row">
               <span class="label">私钥</span>
-              <el-input v-model="rsaPriv" type="textarea" :rows="2" size="small" style="width:560px" placeholder="PKCS8 Base64 或 PEM（-----BEGIN PRIVATE KEY-----）"></el-input>
+              <el-input v-model="rsaPriv" type="textarea" :rows="2" :disabled="!!rsaKeyId" size="small" style="width:560px" placeholder="PKCS8 Base64 或 PEM（-----BEGIN PRIVATE KEY-----）"></el-input>
             </div>
             <div class="row">
               <span class="label">签名(Base64)</span>
@@ -287,13 +314,30 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watch, onMounted, watchEffect } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { copyText } from '../utils/clipboard'
+import { useProjectStore } from '../store/project'
 
+const proj = useProjectStore()
 const tab = ref('json')
 const running = ref(false)
+
+// 引用项目密钥（免粘贴）：SM2/RSA 取公私钥，SM4 取对称密钥+IV；私钥在服务端解析、不回前端
+const keys = ref([])
+const sm2KeyId = ref('')
+const sm4KeyId = ref('')
+const rsaKeyId = ref('')
+const sm2Keys = computed(() => keys.value.filter((k) => k.algorithm === 'SM2'))
+const sm4Keys = computed(() => keys.value.filter((k) => k.algorithm === 'SM4'))
+const rsaKeys = computed(() => keys.value.filter((k) => k.algorithm === 'RSA'))
+async function loadKeys() {
+  if (!proj.id) { keys.value = []; return }
+  try { const res = await api.keys.list(proj.id); keys.value = res.data || [] } catch (e) { keys.value = [] }
+}
+watch(() => proj.id, () => { sm2KeyId.value = ''; sm4KeyId.value = ''; rsaKeyId.value = ''; loadKeys() })
+onMounted(loadKeys)
 
 async function exec(call, payload, onOk) {
   running.value = true
@@ -398,7 +442,7 @@ const sm4Mode = ref('ECB')
 const sm4KeyEnc = ref('utf8')
 const sm4Enc = ref('base64')
 function doSm4(act) {
-  const p = { text: sm4In.value, key: sm4Key.value, iv: sm4Iv.value, mode: sm4Mode.value, keyEnc: sm4KeyEnc.value, outEnc: sm4Enc.value, inEnc: sm4Enc.value }
+  const p = { text: sm4In.value, key: sm4Key.value, iv: sm4Iv.value, mode: sm4Mode.value, keyEnc: sm4KeyEnc.value, outEnc: sm4Enc.value, inEnc: sm4Enc.value, keyId: sm4KeyId.value || undefined }
   exec(act === 'encrypt' ? api.tools.sm4Encrypt : api.tools.sm4Decrypt, p, (v) => { sm4Out.value = v; ElMessage.success('完成') })
 }
 function genSm4Key() {
@@ -415,14 +459,15 @@ const sm2Enc = ref('base64')
 const sm2VerifyRes = ref(null)
 function doSm2(act) {
   sm2VerifyRes.value = null
+  const keyId = sm2KeyId.value || undefined
   if (act === 'encrypt') {
-    exec(api.tools.sm2Encrypt, { text: sm2In.value, pub: sm2Pub.value, outEnc: sm2Enc.value }, (v) => { sm2Out.value = v; ElMessage.success('加密完成') })
+    exec(api.tools.sm2Encrypt, { text: sm2In.value, pub: sm2Pub.value, outEnc: sm2Enc.value, keyId }, (v) => { sm2Out.value = v; ElMessage.success('加密完成') })
   } else if (act === 'decrypt') {
-    exec(api.tools.sm2Decrypt, { text: sm2In.value, priv: sm2Priv.value, inEnc: sm2Enc.value }, (v) => { sm2Out.value = v; ElMessage.success('解密完成') })
+    exec(api.tools.sm2Decrypt, { text: sm2In.value, priv: sm2Priv.value, inEnc: sm2Enc.value, keyId }, (v) => { sm2Out.value = v; ElMessage.success('解密完成') })
   } else if (act === 'sign') {
-    exec(api.tools.sm2Sign, { text: sm2In.value, priv: sm2Priv.value, outEnc: sm2Enc.value }, (v) => { sm2Out.value = v; ElMessage.success('签名完成') })
+    exec(api.tools.sm2Sign, { text: sm2In.value, priv: sm2Priv.value, outEnc: sm2Enc.value, keyId }, (v) => { sm2Out.value = v; ElMessage.success('签名完成') })
   } else if (act === 'verify') {
-    exec(api.tools.sm2Verify, { text: sm2In.value, sig: sm2Sig.value, pub: sm2Pub.value, inEnc: sm2Enc.value }, (v) => { sm2VerifyRes.value = v })
+    exec(api.tools.sm2Verify, { text: sm2In.value, sig: sm2Sig.value, pub: sm2Pub.value, inEnc: sm2Enc.value, keyId }, (v) => { sm2VerifyRes.value = v })
   }
 }
 function genSm2() {
@@ -439,19 +484,41 @@ const rsaBits = ref(2048)
 const rsaVerifyRes = ref(null)
 function doRsa(act) {
   rsaVerifyRes.value = null
+  const keyId = rsaKeyId.value || undefined
   if (act === 'encrypt') {
-    exec(api.tools.rsaEncrypt, { text: rsaIn.value, pub: rsaPub.value }, (v) => { rsaOut.value = v; ElMessage.success('加密完成') })
+    exec(api.tools.rsaEncrypt, { text: rsaIn.value, pub: rsaPub.value, keyId }, (v) => { rsaOut.value = v; ElMessage.success('加密完成') })
   } else if (act === 'decrypt') {
-    exec(api.tools.rsaDecrypt, { text: rsaIn.value, priv: rsaPriv.value }, (v) => { rsaOut.value = v; ElMessage.success('解密完成') })
+    exec(api.tools.rsaDecrypt, { text: rsaIn.value, priv: rsaPriv.value, keyId }, (v) => { rsaOut.value = v; ElMessage.success('解密完成') })
   } else if (act === 'sign') {
-    exec(api.tools.rsaSign, { text: rsaIn.value, priv: rsaPriv.value }, (v) => { rsaOut.value = v; ElMessage.success('签名完成') })
+    exec(api.tools.rsaSign, { text: rsaIn.value, priv: rsaPriv.value, keyId }, (v) => { rsaOut.value = v; ElMessage.success('签名完成') })
   } else if (act === 'verify') {
-    exec(api.tools.rsaVerify, { text: rsaIn.value, sig: rsaSig.value, pub: rsaPub.value }, (v) => { rsaVerifyRes.value = v })
+    exec(api.tools.rsaVerify, { text: rsaIn.value, sig: rsaSig.value, pub: rsaPub.value, keyId }, (v) => { rsaVerifyRes.value = v })
   }
 }
 function genRsa() {
   exec(api.tools.rsaKeypair, { bits: rsaBits.value }, (v) => { rsaPub.value = v.publicKey; rsaPriv.value = v.privateKey; ElMessage.success('已生成 RSA 密钥对') })
 }
+
+// ---- 输入/配置持久化到 localStorage（刷新不丢，常用工具免重填密钥/原文）----
+const PERSIST_KEY = 'mirage_tools_state'
+const persistRefs = {
+  tab, jsonIn, xmlIn, sqlIn, encIn, encMode, hashAlgo, uuidCount, uuidUpper,
+  jsonIndent, xmlIndent,
+  sm3In, sm3OutEnc, sm4In, sm4Key, sm4Iv, sm4Mode, sm4KeyEnc, sm4Enc,
+  sm2In, sm2Pub, sm2Priv, sm2Sig, sm2Enc,
+  rsaIn, rsaPub, rsaPriv, rsaSig, rsaBits
+}
+try {
+  const saved = JSON.parse(localStorage.getItem(PERSIST_KEY) || '{}')
+  for (const [k, r] of Object.entries(persistRefs)) {
+    if (saved[k] != null && typeof saved[k] !== 'object') r.value = saved[k]
+  }
+} catch (e) { /* 忽略损坏的缓存 */ }
+watchEffect(() => {
+  const data = {}
+  for (const [k, r] of Object.entries(persistRefs)) data[k] = r.value
+  try { localStorage.setItem(PERSIST_KEY, JSON.stringify(data)) } catch (e) { /* 配额满忽略 */ }
+})
 </script>
 
 <style scoped>

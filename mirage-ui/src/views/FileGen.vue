@@ -77,8 +77,8 @@
       <template #footer>
         <el-button @click="onPreview" :loading="previewing">预览前 10 行</el-button>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="success" @click="onGenFromForm">生成下载</el-button>
-        <el-button type="primary" @click="onSave">保存</el-button>
+        <el-button type="success" :loading="genLoading" @click="onGenFromForm">生成下载</el-button>
+        <el-button type="primary" :loading="saving" @click="onSave">保存</el-button>
       </template>
     </el-dialog>
 
@@ -108,6 +108,8 @@ const tplArea = ref(null)
 const previewVisible = ref(false)
 const previewing = ref(false)
 const previewLines = ref([])
+const saving = ref(false)
+const genLoading = ref(false)
 
 async function load() {
   if (!proj.id) return
@@ -156,14 +158,21 @@ function buildReq() {
 async function onSave() {
   if (!form.name || !form.name.trim()) { ElMessage.warning('请输入模板名称'); return }
   const payload = { ...form }
-  if (form.id) {
-    await api.fileTemplates.update(form.id, payload)
-  } else {
-    await api.fileTemplates.create(proj.id, payload)
+  saving.value = true
+  try {
+    if (form.id) {
+      await api.fileTemplates.update(form.id, payload)
+    } else {
+      await api.fileTemplates.create(proj.id, payload)
+    }
+    ElMessage.success('已保存')
+    formVisible.value = false
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
   }
-  ElMessage.success('已保存')
-  formVisible.value = false
-  load()
 }
 
 async function onPreview() {
@@ -190,6 +199,7 @@ async function downloadBlob(blob, filename) {
 }
 
 async function generate(req, name, ext) {
+  genLoading.value = true
   try {
     const blob = await api.fileTemplates.generate(req)
     // BizException 返回 HTTP200 + JSON 错误体，需检测
@@ -202,6 +212,8 @@ async function generate(req, name, ext) {
     ElMessage.success('已生成下载')
   } catch {
     ElMessage.error('生成失败，请检查模板')
+  } finally {
+    genLoading.value = false
   }
 }
 

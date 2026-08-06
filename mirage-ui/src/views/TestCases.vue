@@ -13,12 +13,14 @@
             <el-button @click="openVariables">变量/常量</el-button>
             <el-button @click="triggerImport" title="导入 JSON（单条对象或数组）">导入</el-button>
             <el-button @click="exportAll" title="导出当前项目全部用例为 JSON">导出全部</el-button>
+            <el-button type="danger" :icon="Delete" :disabled="!selected.length" :loading="batchRemoving" @click="onBatchRemove">批量删除<span v-if="selected.length">（{{ selected.length }}）</span></el-button>
             <el-button type="primary" :icon="Plus" @click="openCreate">新建用例</el-button>
           </div>
           <input ref="importInput" type="file" accept=".json,application/json" style="display:none" @change="onImportFile" />
         </div>
       </template>
-      <el-table :data="filtered" v-loading="loading" border stripe size="small">
+      <el-table :data="filtered" v-loading="loading" border stripe size="small" @selection-change="onSelectionChange">
+        <el-table-column type="selection" width="42" />
         <template #empty>
           <el-empty description="暂无用例">
             <el-button type="primary" size="small" @click="openCreate">新建用例</el-button>
@@ -36,10 +38,11 @@
         <el-table-column label="模式" width="90">
           <template #default="{ row }">{{ row.mode === 'direct' ? '浏览器直发' : '后端转发' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="340">
+        <el-table-column label="操作" width="400">
           <template #default="{ row }">
             <el-button size="small" type="success" link @click="onRun(row)">运行</el-button>
             <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
+            <el-button size="small" link @click="onClone(row)">复制</el-button>
             <el-button size="small" type="info" link @click="openHistory(row)">历史</el-button>
             <el-button size="small" link @click="exportOne(row)">导出</el-button>
             <el-button size="small" type="danger" link @click="onRemove(row)">删除</el-button>
@@ -99,6 +102,16 @@
           <el-button :icon="Delete" circle size="small" type="danger" @click="form.headers.splice(i,1)" />
         </div>
         <el-button size="small" :icon="Plus" @click="form.headers.push({ k: '', v: '' })">加请求头</el-button>
+        <el-dropdown trigger="click" @command="addCommonHeader">
+          <el-button size="small" link type="primary">常用头 ▾</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="json">Content-Type: application/json</el-dropdown-item>
+              <el-dropdown-item command="accept">Accept: application/json</el-dropdown-item>
+              <el-dropdown-item command="auth">Authorization: Bearer $&#123;var.token&#125;</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
 
         <div class="kv-title" style="margin-top:10px">查询参数（Query）</div>
         <div v-for="(q, i) in form.query" :key="'q'+i" class="kv-row">
@@ -197,6 +210,10 @@
         </template>
 
         <el-divider content-position="left">断言</el-divider>
+        <div class="hint" style="margin:2px 0 8px">
+          JSONPath 用 <span class="mono">$.data.id</span> 定位字段，支持 = / ≠ / &gt; / &lt; / ≥ / ≤ / exists；
+          JSON Schema 填标准 Schema，如 <span class="mono">{"type":"object","required":["code"]}</span>。
+        </div>
         <div v-for="(a, i) in form.assertions" :key="'a'+i" class="kv-row">
           <el-select v-model="a.type" style="width:150px">
             <el-option label="状态码 status" value="status" />
@@ -235,10 +252,17 @@
         <textarea v-model="form.dataSet" class="body-area" rows="4" spellcheck="false" placeholder='[{"uid":10086},{"uid":10087}]'></textarea>
       </el-form>
       <template #footer>
-        <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="success" @click="onSend" :loading="sending">发送</el-button>
-        <el-button type="primary" @click="onSave">保存</el-button>
-        <el-button type="warning" @click="onRunData" :loading="dataSending" :disabled="form.mode !== 'proxy'">数据驱动运行</el-button>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%">
+          <span style="color:#909399;font-size:12px">运行环境：</span>
+          <el-select v-model="runEnv" placeholder="默认(不注入)" clearable size="small" style="width:170px">
+            <el-option v-for="e in envs" :key="e.id" :label="e.name + (e.baseUrl ? ' · ' + e.baseUrl : '')" :value="e.id" />
+          </el-select>
+          <span style="flex:1"></span>
+          <el-button @click="formVisible = false">取消</el-button>
+          <el-button type="success" @click="onSend" :loading="sending">发送</el-button>
+          <el-button type="primary" @click="onSave">保存</el-button>
+          <el-button type="warning" @click="onRunData" :loading="dataSending" :disabled="form.mode !== 'proxy'">数据驱动运行</el-button>
+        </div>
       </template>
     </el-dialog>
 
@@ -339,6 +363,7 @@ import { Plus, Delete } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
 import { useTestCaseDraftStore } from '../store/testcaseDraft'
+import { useEnvStore } from '../store/env'
 import { parseCurl } from '../utils/curl'
 import { copyText } from '../utils/clipboard'
 import FunctionMarketSidebar from '../components/FunctionMarketSidebar.vue'
@@ -346,6 +371,7 @@ import ResponseBody from '../components/ResponseBody.vue'
 
 const proj = useProjectStore()
 const draftStore = useTestCaseDraftStore()
+const envStore = useEnvStore()
 const list = ref([])
 const loading = ref(false)
 const keyword = ref('')
@@ -390,6 +416,12 @@ const history = ref([])
 const dataResultVisible = ref(false)
 const dataResult = ref(null)
 const dataSending = ref(false)
+// 运行环境按项目持久化（全局环境选择器）：跨页面/刷新保持，切换项目自动取该项目上次选择
+const runEnv = computed({
+  get: () => envStore.envId(proj.id),
+  set: (v) => envStore.setEnvId(proj.id, v)
+})
+const envs = ref([])
 const dataRows = computed(() => { try { return JSON.parse(form.dataSet || '[]') } catch (e) { return [] } })
 const dataResultRows = computed(() => {
   if (!dataResult.value || !dataResult.value.results) return []
@@ -420,15 +452,26 @@ function openCreate() {
   formVisible.value = true
 }
 
-function openEdit(row) {
-  form.id = row.id
-  form.name = row.name; form.protocol = row.protocol || 'HTTP'; form.method = row.method || 'GET'; form.url = row.url || ''
-  form.tcpConfig = row.tcpConfig || ''
-  form.tagsArr = parseArr(row.tags)
-  loadBody(row)
-  form.mode = row.mode || 'proxy'; form.status = row.status == null ? 1 : row.status; form.remark = row.remark || ''
-  form.headers = parseArr(row.headers); form.query = parseArr(row.query); form.assertions = parseArr(row.assertions)
-  form.dataSet = row.dataSet || ''
+// 用例全量 → 编辑态（不含 formVisible/草稿重置，供 openEdit/onRun 复用）
+function applyCaseToForm(tc) {
+  form.id = tc.id
+  form.name = tc.name; form.protocol = tc.protocol || 'HTTP'; form.method = tc.method || 'GET'; form.url = tc.url || ''
+  form.tcpConfig = tc.tcpConfig || ''
+  form.tagsArr = parseArr(tc.tags)
+  loadBody(tc)
+  form.mode = tc.mode || 'proxy'; form.status = tc.status == null ? 1 : tc.status; form.remark = tc.remark || ''
+  form.headers = parseArr(tc.headers); form.query = parseArr(tc.query); form.assertions = parseArr(tc.assertions)
+  form.dataSet = tc.dataSet || ''
+}
+
+async function openEdit(row) {
+  // 列表行已瘦身：有 id 时取全量；草稿(来自「请求日志→生成用例」，无 id)已是全量直接用
+  let tc = row
+  if (row && row.id) {
+    const res = await api.testCases.get(row.id)
+    tc = res.data
+  }
+  applyCaseToForm(tc)
   listenerPick.value = ''
   curlText.value = ''
   formVisible.value = true
@@ -607,21 +650,25 @@ async function onSend() {
       await runDirect()
     } else {
       await saveSilently()
-      const res = await api.testCases.run(form.id)
+      const res = await api.testCases.run(form.id, runEnv.value)
       showResult({ ...res.data, mode: 'proxy' })
     }
   } catch (e) {
-    ElMessage.error('发送失败：' + (e?.response?.data?.message || e.message || ''))
+    // proxy 模式错误已由全局拦截器提示；direct 模式走浏览器原生 fetch、不经拦截器，这里补一条
+    if (form.mode === 'direct') {
+      ElMessage.error('发送失败：' + (e?.message || ''))
+    }
   } finally {
     sending.value = false
   }
 }
 
 async function onRun(row) {
-  // 从列表直接运行：有数据行 → 数据驱动，否则普通运行
-  openEdit(row)
+  // 从列表直接运行：取全量后按 dataSet 判定 数据驱动/普通；不打开编辑弹窗(避免闪窗)
+  const res = await api.testCases.get(row.id)
+  applyCaseToForm(res.data)
   formVisible.value = false
-  if ((row.dataSet || '').trim()) {
+  if ((form.dataSet || '').trim()) {
     await onRunData()
   } else {
     await onSend()
@@ -638,12 +685,12 @@ async function onRunData() {
   dataSending.value = true
   try {
     await saveSilently()
-    const res = await api.testCases.runData(form.id)
+    const res = await api.testCases.runData(form.id, runEnv.value)
     dataResult.value = res.data
     dataResultVisible.value = true
     formVisible.value = false
   } catch (e) {
-    ElMessage.error('数据驱动运行失败：' + (e?.response?.data?.message || e.message || ''))
+    /* 拦截器已提示 */
   } finally {
     dataSending.value = false
   }
@@ -805,7 +852,57 @@ async function onRemove(row) {
   ElMessage.success('已删除'); load()
 }
 
-watch(() => proj.id, () => { load(); loadVariables() })
+async function onClone(row) {
+  // 一键复制：取全量 → 去主键/项目/时间戳 → 改名(副本) → 直接建副本
+  try {
+    const res = await api.testCases.get(row.id)
+    const dup = sanitizeCase(res.data)
+    dup.name = (res.data.name || '未命名') + '(副本)'
+    await api.testCases.create(proj.id, dup)
+    ElMessage.success('已复制为「' + dup.name + '」')
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  }
+}
+
+function addCommonHeader(cmd) {
+  const map = {
+    json: { k: 'Content-Type', v: 'application/json' },
+    accept: { k: 'Accept', v: 'application/json' },
+    auth: { k: 'Authorization', v: 'Bearer ${var.token}' }
+  }
+  const row = map[cmd]
+  if (!row) return
+  if (form.headers.some((h) => h.k === row.k)) { ElMessage.info(row.k + ' 已存在'); return }
+  form.headers.push({ ...row })
+}
+
+const selected = ref([])
+const batchRemoving = ref(false)
+function onSelectionChange(rows) { selected.value = rows }
+async function onBatchRemove() {
+  if (!selected.value.length) return
+  await ElMessageBox.confirm(`确认删除选中的 ${selected.value.length} 条用例及其历史？`, '批量删除', { type: 'warning' })
+  batchRemoving.value = true
+  try {
+    await api.testCases.removeBatch(selected.value.map((r) => r.id))
+    ElMessage.success('已删除 ' + selected.value.length + ' 条')
+    selected.value = []
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    batchRemoving.value = false
+  }
+}
+
+async function loadEnvs() {
+  if (!proj.id) { envs.value = []; return }
+  try { const r = await api.environments.list(proj.id); envs.value = r.data || [] } catch (e) { envs.value = [] }
+}
+
+watch(() => proj.id, () => { load(); loadVariables(); loadEnvs() })
 // TCP 监听器：填充帧/格式配置
 const tcpListeners = ref([])
 const listenerPick = ref('')
@@ -842,14 +939,18 @@ function downloadJson(obj, filename) {
   a.click()
   URL.revokeObjectURL(url)
 }
-function exportOne(row) {
+async function exportOne(row) {
+  const res = await api.testCases.get(row.id)
   const safe = (row.name || 'case').replace(/[^\w一-龥.-]/g, '_')
-  downloadJson(sanitizeCase(row), `testcase-${safe}.json`)
+  downloadJson(sanitizeCase(res.data), `testcase-${safe}.json`)
 }
-function exportAll() {
+async function exportAll() {
   if (!list.value.length) { ElMessage.warning('暂无用例可导出'); return }
-  downloadJson(list.value.map(sanitizeCase).filter(Boolean), `testcases-${proj.code || proj.id || 'project'}.json`)
-  ElMessage.success('已导出 ' + list.value.length + ' 条')
+  // 列表已瘦身，逐条取全量再导出（导出的是完整用例）
+  const full = await Promise.all(list.value.map((r) => api.testCases.get(r.id).then((x) => x.data).catch(() => null)))
+  const clean = full.filter(Boolean).map(sanitizeCase)
+  downloadJson(clean, `testcases-${proj.code || proj.id || 'project'}.json`)
+  ElMessage.success('已导出 ' + clean.length + ' 条')
 }
 function triggerImport() { if (importInput.value) importInput.value.click() }
 async function onImportFile(e) {
@@ -875,6 +976,7 @@ async function onImportFile(e) {
 onMounted(() => {
   load()
   loadVariables()
+  loadEnvs()
   loadListeners()
   // 来自「请求日志 → 生成用例」的草稿：取出并打开新建弹窗（id 为空即新建）
   const draft = draftStore.take()

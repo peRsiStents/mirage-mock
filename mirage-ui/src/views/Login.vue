@@ -16,6 +16,7 @@
         </el-form-item>
         <el-button type="primary" :loading="loading" class="login-btn" @click="onLogin">登录</el-button>
         <el-alert v-if="loginError" :title="loginError" type="error" show-icon :closable="false" style="margin-top: 12px" />
+        <div class="default-hint">首次部署？默认账号 <b>admin</b> / <b>admin123</b>（登录后请及时修改密码）</div>
       </el-form>
     </el-card>
   </div>
@@ -92,5 +93,16 @@ async function onLogin() {
 .login-btn {
   width: 100%;
   margin-top: 4px;
+}
+.default-hint {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
+}
+.default-hint b {
+  color: #606266;
+  font-weight: 600;
 }
 </style>

@@ -7,6 +7,7 @@ export const api = {
   projects: {
     list: () => http.get('/projects'),
     create: (p) => http.post('/projects', p),
+    createSample: () => http.post('/projects/sample'),
     update: (id, p) => http.put(`/projects/${id}`, p),
     remove: (id) => http.delete(`/projects/${id}`),
     members: (id) => http.get(`/projects/${id}/members`),
@@ -24,6 +25,9 @@ export const api = {
     create: (iid, r) => http.post(`/interfaces/${iid}/rules`, r),
     update: (id, r) => http.put(`/rules/${id}`, r),
     remove: (id) => http.delete(`/rules/${id}`),
+    removeBatch: (ids) => http.delete('/rules/batch', { data: ids }),
+    setPriority: (id, priority) => http.put(`/rules/${id}/priority`, null, { params: { priority } }),
+    setBatchStatus: (ids, status) => http.put('/rules/batch/status', { ids, status }),
     toggle: (id) => http.post(`/rules/${id}/toggle`)
   },
   listeners: {
@@ -43,6 +47,7 @@ export const api = {
   },
   logs: {
     query: (pid, params) => http.get(`/projects/${pid}/logs`, { params }),
+    get: (pid, logId) => http.get(`/projects/${pid}/logs/${logId}`),
     toTestCase: (pid, logId) => http.post(`/projects/${pid}/logs/${logId}/testcase`)
   },
   template: {
@@ -93,6 +98,9 @@ export const api = {
   system: {
     info: () => http.get('/system/info')
   },
+  dashboard: {
+    overview: (pid) => http.get(`/projects/${pid}/dashboard`)
+  },
   users: {
     list: () => http.get('/users'),
     create: (u) => http.post('/users', u),
@@ -109,9 +117,11 @@ export const api = {
   },
   testCases: {
     list: (pid) => http.get(`/projects/${pid}/testcases`),
+    get: (id) => http.get(`/testcases/${id}`),
     create: (pid, t) => http.post(`/projects/${pid}/testcases`, t),
     update: (id, t) => http.put(`/testcases/${id}`, t),
     remove: (id) => http.delete(`/testcases/${id}`),
+    removeBatch: (ids) => http.delete('/testcases/batch', { data: ids }),
     run: (id, envId) => http.post(`/testcases/${id}/run`, null, { params: { envId } }),
     runData: (id, envId) => http.post(`/testcases/${id}/run-data`, null, { params: { envId } }),
     runs: (id) => http.get(`/testcases/${id}/runs`)

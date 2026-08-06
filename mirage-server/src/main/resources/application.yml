@@ -4,6 +4,9 @@ server:
     encoding:
       charset: UTF-8
       force: true
+  tomcat:
+    max-swallow-size: 2MB
+  max-http-request-header-size: 16KB
 
 spring:
   application:

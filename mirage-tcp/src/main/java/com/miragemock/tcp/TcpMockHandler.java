@@ -10,6 +10,7 @@ import com.miragemock.core.log.RequestLogSink;
 import com.miragemock.core.render.RenderedResponse;
 import com.miragemock.dsl.crypto.Codec;
 import com.miragemock.tcp.codec.RouteExtractor;
+import com.miragemock.tcp.frame.FrameEncoder;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandler;
@@ -114,7 +115,8 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
         TcpListener listener = runtime.getListener();
         String clientAddr = ctx.channel().remoteAddress() == null ? "?" : ctx.channel().remoteAddress().toString();
         Map<String, Object> fields = new LinkedHashMap<>();
-        byte[] respBytes = new byte[0];
+        byte[] payloadBytes = new byte[0]; // 报文正文（去帧），用于日志展示，与请求一样不含帧头
+        byte[] respBytes = new byte[0];    // 实际回写的线路字节（含帧）
         Long ifaceId = null;
         Long ruleId = null;
         boolean matched = false;
@@ -137,9 +139,12 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
                     return;
                 case WRITE:
                 default:
-                    respBytes = runtime.getParser().encode(result.getFields(), runtime.getFormatConfig());
+                    payloadBytes = runtime.getParser().encode(result.getFields(), runtime.getFormatConfig());
                     break;
             }
+            // 响应按 frame_config 加帧（length_field 前置长度头等），与入站解码互逆——
+            // 否则长度头协议的客户端会把正文首字节当帧头/内容错位（如 0x74 被读成 't'）。
+            respBytes = FrameEncoder.encode(payloadBytes, listener.getFrameConfig());
             boolean shortConn = "SHORT".equalsIgnoreCase(listener.getConnMode());
             ByteBuf out = Unpooled.wrappedBuffer(respBytes);
             if (shortConn) {
@@ -153,8 +158,9 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
                 Map<String, Object> err = new LinkedHashMap<>();
                 err.put("error", "MOCK_INTERNAL_ERROR");
                 err.put("message", t.getMessage());
-                byte[] errBytes = runtime.getParser().encode(err, runtime.getFormatConfig());
-                ctx.writeAndFlush(Unpooled.wrappedBuffer(errBytes));
+                payloadBytes = runtime.getParser().encode(err, runtime.getFormatConfig());
+                respBytes = FrameEncoder.encode(payloadBytes, listener.getFrameConfig());
+                ctx.writeAndFlush(Unpooled.wrappedBuffer(respBytes));
             } catch (Exception ignore) {
                 ctx.close();
             }
@@ -169,7 +175,7 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
                         .clientAddr(clientAddr)
                         .requestRaw(truncate(Codec.hex(frame)))
                         .requestParsed(truncate(JsonUtils.toJson(fields)))
-                        .responseRaw(truncate(new String(respBytes, StandardCharsets.UTF_8)))
+                        .responseRaw(truncate(new String(payloadBytes, StandardCharsets.UTF_8)))
                         .matched(matched)
                         .costMs(cost)
                         .build());
@@ -188,6 +194,7 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
             Object body = rr.getBody();
             Map<String, Object> fields = (body instanceof Map) ? (Map<String, Object>) body : new LinkedHashMap<>();
             byte[] bytes = runtime.getParser().encode(fields, runtime.getFormatConfig());
+            bytes = FrameEncoder.encode(bytes, runtime.getListener().getFrameConfig());
             if (ctx.channel().isActive()) {
                 ctx.writeAndFlush(Unpooled.wrappedBuffer(bytes));
             }

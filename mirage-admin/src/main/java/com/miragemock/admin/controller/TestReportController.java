@@ -28,9 +28,11 @@ public class TestReportController {
                                                      @RequestParam(required = false) String type,
                                                      @RequestParam(required = false) Long targetId,
                                                      @RequestParam(required = false) Integer passed,
+                                                     @RequestParam(required = false) Long from,
+                                                     @RequestParam(required = false) Long to,
                                                      @RequestParam(defaultValue = "1") long page,
                                                      @RequestParam(defaultValue = "20") long size) {
-        return Result.ok(service.records(pid, type, targetId, passed, page, size));
+        return Result.ok(service.records(pid, type, targetId, passed, from, to, page, size));
     }
 
     @GetMapping("/records/{id}")

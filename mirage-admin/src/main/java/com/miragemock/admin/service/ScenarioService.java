@@ -8,6 +8,7 @@ import com.miragemock.admin.mapper.TestCaseMapper;
 import com.miragemock.admin.mapper.TestRunRecordMapper;
 import com.miragemock.admin.mapper.TestScenarioMapper;
 import com.miragemock.admin.mapper.TestScenarioStepMapper;
+import com.miragemock.admin.security.ProjectAuthz;
 import com.miragemock.common.api.PageResult;
 import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
@@ -24,7 +25,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -45,16 +48,18 @@ public class ScenarioService {
     private final TestRunRecordMapper recordMapper;
     private final TestCaseMapper caseMapper;
     private final TestCaseService testCaseService;
+    private final ProjectAuthz authz;
 
     @Autowired
     public ScenarioService(TestScenarioMapper scenarioMapper, TestScenarioStepMapper stepMapper,
                            TestRunRecordMapper recordMapper, TestCaseMapper caseMapper,
-                           TestCaseService testCaseService) {
+                           TestCaseService testCaseService, ProjectAuthz authz) {
         this.scenarioMapper = scenarioMapper;
         this.stepMapper = stepMapper;
         this.recordMapper = recordMapper;
         this.caseMapper = caseMapper;
         this.testCaseService = testCaseService;
+        this.authz = authz;
     }
 
     // ============ 场景 CRUD ============
@@ -70,6 +75,7 @@ public class ScenarioService {
         if (s == null) {
             throw new BizException(ResultCode.NOT_FOUND, "测试场景不存在");
         }
+        authz.requireMember(s.getProjectId());
         return s;
     }
 
@@ -133,7 +139,11 @@ public class ScenarioService {
     // ============ 运行 ============
 
     public ScenarioRunResult runScenario(Long scenarioId, Long envId) {
-        TestScenario sc = get(scenarioId);
+        // 直接取场景，不走 get()（后者带成员校验）：本方法也被 CI(token 鉴权)与定时调度(系统线程)调用，无 AuthContext
+        TestScenario sc = scenarioMapper.selectById(scenarioId);
+        if (sc == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "测试场景不存在");
+        }
         Long env = envId != null ? envId : sc.getEnvId();
         Long projectId = sc.getProjectId();
         String onFail = sc.getOnFail() == null ? "STOP" : sc.getOnFail().toUpperCase();
@@ -142,6 +152,24 @@ public class ScenarioService {
                 .eq(TestScenarioStep::getScenarioId, scenarioId)
                 .eq(TestScenarioStep::getEnabled, 1)
                 .orderByAsc(TestScenarioStep::getSeq));
+
+        // 批量预取步骤用例，避免逐步 selectById（N+1）；按 id 索引复用。
+        Set<Long> caseIdSet = new HashSet<>();
+        for (TestScenarioStep step : steps) {
+            if (step.getCaseId() != null) {
+                caseIdSet.add(step.getCaseId());
+            }
+        }
+        Map<Long, TestCase> caseMap = new HashMap<>();
+        if (!caseIdSet.isEmpty()) {
+            for (TestCase c : caseMapper.selectBatchIds(caseIdSet)) {
+                if (c.getId() != null) {
+                    caseMap.put(c.getId(), c);
+                }
+            }
+        }
+        // 项目变量 + 环境变量只加载一次，多步骤/多数据行复用（原 runOnce 每次都查两轮库）。
+        Map<String, Object> baseVars = testCaseService.buildBaseVars(projectId, env);
 
         Map<String, Object> runtimeExtra = new HashMap<>();
         List<Map<String, Object>> detail = new ArrayList<>();
@@ -155,7 +183,7 @@ public class ScenarioService {
             d.put("seq", step.getSeq());
             d.put("caseId", step.getCaseId());
             d.put("stepName", step.getName());
-            TestCase tc = caseMapper.selectById(step.getCaseId());
+            TestCase tc = caseMap.get(step.getCaseId());
             d.put("caseName", tc == null ? "(用例已删除)" : tc.getName());
 
             if (stopped) {
@@ -183,7 +211,7 @@ public class ScenarioService {
                             rowExtra.put("var." + en.getKey(), en.getValue());
                         }
                     }
-                    RunResult rr = runOnce(tc, projectId, env, rowExtra);
+                    RunResult rr = runOnce(tc, projectId, baseVars, rowExtra);
                     Map<String, Object> ex = testCaseService.extract(rr, parseList(step.getExtract()));
                     runtimeExtra.putAll(ex);
                     stepExtracts.putAll(ex);
@@ -213,7 +241,7 @@ public class ScenarioService {
                 d.put("skipped", false);
             } else {
                 // 普通单次执行
-                RunResult rr = runOnce(tc, projectId, env, runtimeExtra);
+                RunResult rr = runOnce(tc, projectId, baseVars, runtimeExtra);
                 Map<String, Object> extracts = testCaseService.extract(rr, parseList(step.getExtract()));
                 runtimeExtra.putAll(extracts);
                 stepPassed = Boolean.TRUE.equals(rr.getPassed());
@@ -267,15 +295,23 @@ public class ScenarioService {
 
     // ============ 报告 ============
 
-    public PageResult<TestRunRecord> records(Long projectId, String type, Long targetId, Integer passed, long page, long size) {
+    public PageResult<TestRunRecord> records(Long projectId, String type, Long targetId, Integer passed,
+                                             Long from, Long to, long page, long size) {
         if (page < 1) page = 1;
         if (size < 1 || size > 200) size = 20;
         LambdaQueryWrapper<TestRunRecord> w = new LambdaQueryWrapper<TestRunRecord>()
+                // 列表瘦身：排除大字段 detail（每步明细 JSON），详情弹窗经 record(id) 懒加载
+                .select(TestRunRecord::getId, TestRunRecord::getProjectId, TestRunRecord::getTargetType,
+                        TestRunRecord::getTargetId, TestRunRecord::getEnvId, TestRunRecord::getPassed,
+                        TestRunRecord::getTotalSteps, TestRunRecord::getPassedSteps, TestRunRecord::getFailedSteps,
+                        TestRunRecord::getCostMs, TestRunRecord::getCreateTime, TestRunRecord::getUpdateTime)
                 .eq(TestRunRecord::getProjectId, projectId)
                 .orderByDesc(TestRunRecord::getCreateTime);
         if (type != null && !type.isEmpty()) w.eq(TestRunRecord::getTargetType, type);
         if (targetId != null) w.eq(TestRunRecord::getTargetId, targetId);
         if (passed != null) w.eq(TestRunRecord::getPassed, passed);
+        if (from != null) w.ge(TestRunRecord::getCreateTime, new Date(from).toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime());
+        if (to != null) w.le(TestRunRecord::getCreateTime, new Date(to).toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime());
         Page<TestRunRecord> p = recordMapper.selectPage(new Page<>(page, size), w);
         enrichTargetNames(p.getRecords());
         return PageResult.of(p.getRecords(), p.getTotal(), page, size);
@@ -324,6 +360,7 @@ public class ScenarioService {
         if (r == null) {
             throw new BizException(ResultCode.NOT_FOUND, "报告不存在");
         }
+        authz.requireMember(r.getProjectId());
         return r;
     }
 
@@ -341,8 +378,8 @@ public class ScenarioService {
 
     // ============ 工具 ============
 
-    /** 执行单个用例一次（带运行时变量），失败转成 RunResult 而不抛出。 */
-    private RunResult runOnce(TestCase tc, Long projectId, Long env, Map<String, Object> extraVars) {
+    /** 执行单个用例一次（基于已加载的 baseVars 注入运行时变量），失败转成 RunResult 而不抛出。 */
+    private RunResult runOnce(TestCase tc, Long projectId, Map<String, Object> baseVars, Map<String, Object> extraVars) {
         if (tc == null) {
             RunResult rr = new RunResult();
             rr.setAssertions(new ArrayList<>());
@@ -351,8 +388,11 @@ public class ScenarioService {
             return rr;
         }
         try {
-            EvalContext ctx = testCaseService.buildEvalContext(projectId, env, extraVars);
-            return testCaseService.executeCase(tc, ctx);
+            Map<String, Object> vars = new HashMap<>(baseVars);
+            if (extraVars != null) {
+                vars.putAll(extraVars);
+            }
+            return testCaseService.executeCase(tc, testCaseService.newContext(projectId, vars));
         } catch (Exception e) {
             RunResult rr = new RunResult();
             rr.setAssertions(new ArrayList<>());

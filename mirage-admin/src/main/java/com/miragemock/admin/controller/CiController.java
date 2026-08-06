@@ -12,9 +12,13 @@ import com.miragemock.common.exception.BizException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * CI headless 运行接口（免 JWT，凭 project.ciToken 鉴权）。
@@ -38,14 +42,19 @@ public class CiController {
 
     @PostMapping("/scenarios/{id}/run")
     public Result<ScenarioRunResult> run(@PathVariable Long id,
-                                         @RequestParam String token,
+                                         @RequestParam(required = false) String token,
+                                         @RequestHeader(value = "X-CI-Token", required = false) String headerToken,
                                          @RequestParam(required = false) Long env) {
+        // token 优先取请求头（避免进 access log/referer），回退 query 参数兼容旧调用
+        String tok = (token != null && !token.isEmpty()) ? token : headerToken;
         TestScenario sc = scenarioMapper.selectById(id);
         if (sc == null) {
             throw new BizException(ResultCode.NOT_FOUND, "场景不存在");
         }
         Project p = projectMapper.selectById(sc.getProjectId());
-        if (p == null || p.getCiToken() == null || !p.getCiToken().equals(token)) {
+        if (p == null || p.getCiToken() == null || tok == null
+                || !MessageDigest.isEqual(tok.getBytes(StandardCharsets.UTF_8),
+                                          p.getCiToken().getBytes(StandardCharsets.UTF_8))) {
             throw new BizException(ResultCode.UNAUTHORIZED, "CI token 无效");
         }
         return Result.ok(scenarioService.runScenario(id, env));

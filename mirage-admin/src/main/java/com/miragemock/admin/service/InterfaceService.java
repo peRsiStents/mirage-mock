@@ -9,6 +9,7 @@ import com.miragemock.common.entity.ApiInterface;
 import com.miragemock.common.entity.MockRule;
 import com.miragemock.common.exception.BizException;
 import com.miragemock.core.cache.RuleCache;
+import com.miragemock.admin.security.ProjectAuthz;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,12 +22,15 @@ public class InterfaceService {
     private final ApiInterfaceMapper interfaceMapper;
     private final MockRuleMapper ruleMapper;
     private final RuleCache ruleCache;
+    private final ProjectAuthz authz;
 
     @Autowired
-    public InterfaceService(ApiInterfaceMapper interfaceMapper, MockRuleMapper ruleMapper, RuleCache ruleCache) {
+    public InterfaceService(ApiInterfaceMapper interfaceMapper, MockRuleMapper ruleMapper, RuleCache ruleCache,
+                            ProjectAuthz authz) {
         this.interfaceMapper = interfaceMapper;
         this.ruleMapper = ruleMapper;
         this.ruleCache = ruleCache;
+        this.authz = authz;
     }
 
     public List<ApiInterface> list(Long projectId) {
@@ -40,6 +44,7 @@ public class InterfaceService {
         if (iface == null) {
             throw new BizException(ResultCode.INTERFACE_NOT_FOUND);
         }
+        authz.requireMember(iface.getProjectId());
         return iface;
     }
 

@@ -14,7 +14,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class RuleService {
@@ -31,6 +33,8 @@ public class RuleService {
     }
 
     public List<MockRule> list(Long interfaceId) {
+        // /interfaces/{iid}/rules 不在 pid 拦截器覆盖范围，这里通过接口归属校验成员权限
+        interfaceService.get(interfaceId);
         return ruleMapper.selectList(new LambdaQueryWrapper<MockRule>()
                 .eq(MockRule::getInterfaceId, interfaceId)
                 .orderByAsc(MockRule::getPriority)
@@ -42,6 +46,8 @@ public class RuleService {
         if (rule == null) {
             throw new BizException(ResultCode.RULE_NOT_FOUND);
         }
+        // 通过所属接口的项目校验成员权限（admin 直通）
+        interfaceService.get(rule.getInterfaceId());
         return rule;
     }
 
@@ -71,6 +77,58 @@ public class RuleService {
         ApiInterface iface = interfaceService.get(exists.getInterfaceId());
         ruleMapper.deleteById(id);
         ruleCache.invalidate(iface.getProjectId());
+    }
+
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        List<MockRule> rules = ruleMapper.selectBatchIds(ids);
+        ruleMapper.deleteBatchIds(ids);
+        Set<Long> projectIds = new HashSet<>();
+        for (MockRule r : rules) {
+            ApiInterface iface = interfaceService.get(r.getInterfaceId());
+            if (iface != null) {
+                projectIds.add(iface.getProjectId());
+            }
+        }
+        for (Long pid : projectIds) {
+            ruleCache.invalidate(pid);
+        }
+    }
+
+    /** 仅改优先级（列表上移/下移用），避免整体 toEntity 覆盖其它字段。 */
+    @Transactional
+    public void setPriority(Long id, Integer priority) {
+        MockRule exists = get(id);
+        exists.setPriority(priority);
+        ruleMapper.updateById(exists);
+        ApiInterface iface = interfaceService.get(exists.getInterfaceId());
+        if (iface != null) {
+            ruleCache.invalidate(iface.getProjectId());
+        }
+    }
+
+    /** 批量启用/停用。 */
+    @Transactional
+    public void setBatchStatus(List<Long> ids, Integer status) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        List<MockRule> rules = ruleMapper.selectBatchIds(ids);
+        Set<Long> projectIds = new HashSet<>();
+        for (MockRule r : rules) {
+            r.setStatus(status);
+            ruleMapper.updateById(r);
+            ApiInterface iface = interfaceService.get(r.getInterfaceId());
+            if (iface != null) {
+                projectIds.add(iface.getProjectId());
+            }
+        }
+        for (Long pid : projectIds) {
+            ruleCache.invalidate(pid);
+        }
     }
 
     @Transactional

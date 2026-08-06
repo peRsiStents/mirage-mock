@@ -194,6 +194,7 @@ CREATE TABLE test_run_log (
     update_time      DATETIME
 );
 CREATE INDEX idx_runlog_case ON test_run_log (case_id, create_time);
+CREATE INDEX idx_runlog_project ON test_run_log (project_id, create_time);
 
 -- ===== P2: 测试变量/常量 =====
 CREATE TABLE test_variable (

@@ -30,8 +30,8 @@
         </el-table-column>
         <el-table-column label="操作" width="240">
           <template #default="{ row }">
-            <el-button v-if="!running[row.id]" size="small" type="success" @click="start(row)">启动</el-button>
-            <el-button v-else size="small" type="warning" @click="stop(row)">停止</el-button>
+            <el-button v-if="!running[row.id]" size="small" type="success" :loading="opLoading[row.id]" @click="start(row)">启动</el-button>
+            <el-button v-else size="small" type="warning" :loading="opLoading[row.id]" @click="stop(row)">停止</el-button>
             <el-button size="small" type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button size="small" type="danger" @click="onRemove(row)">删除</el-button>
           </template>
@@ -99,7 +99,7 @@
       </el-form>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">保存并应用</el-button>
+        <el-button type="primary" :loading="saving" @click="onSave">保存并应用</el-button>
       </template>
     </el-dialog>
   </div>
@@ -116,6 +116,8 @@ const proj = useProjectStore()
 const list = ref([])
 const loading = ref(false)
 const running = ref({})
+const opLoading = reactive({})
+const saving = ref(false)
 const visible = ref(false)
 const form = reactive(emptyForm())
 
@@ -179,11 +181,18 @@ async function onSave() {
     if (!isJson(form[f])) { ElMessage.error((cfgLabel[f] || f) + ' 不是合法 JSON，请检查'); return }
   }
   const payload = { ...form }
-  if (form.id) await api.listeners.update(form.id, payload)
-  else await api.listeners.create(proj.id, payload)
-  ElMessage.success('已保存并应用')
-  visible.value = false
-  load()
+  saving.value = true
+  try {
+    if (form.id) await api.listeners.update(form.id, payload)
+    else await api.listeners.create(proj.id, payload)
+    ElMessage.success('已保存并应用')
+    visible.value = false
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
+  }
 }
 
 async function onRemove(row) {
@@ -193,8 +202,37 @@ async function onRemove(row) {
   load()
 }
 
-async function start(row) { await api.listeners.start(row.id); ElMessage.success('已启动'); load() }
-async function stop(row) { await api.listeners.stop(row.id); ElMessage.success('已停止'); load() }
+async function start(row) {
+  try {
+    await ElMessageBox.confirm(`启动监听器「${row.name}」？将绑定端口 ${row.port}。`, '启动确认', { type: 'warning' })
+  } catch (e) { return }
+  opLoading[row.id] = true
+  try {
+    await api.listeners.start(row.id)
+    ElMessage.success('已启动')
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    opLoading[row.id] = false
+  }
+}
+
+async function stop(row) {
+  try {
+    await ElMessageBox.confirm(`停止监听器「${row.name}」？端口 ${row.port} 将解绑，已连接的客户端会被断开。`, '停止确认', { type: 'warning' })
+  } catch (e) { return }
+  opLoading[row.id] = true
+  try {
+    await api.listeners.stop(row.id)
+    ElMessage.success('已停止')
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    opLoading[row.id] = false
+  }
+}
 
 watch(() => proj.id, load)
 onMounted(load)

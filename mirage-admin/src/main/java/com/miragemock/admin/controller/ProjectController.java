@@ -38,6 +38,12 @@ public class ProjectController {
         return Result.ok(projectService.create(project));
     }
 
+    /** 一键生成示例项目（含 HTTP 接口与 Mock 规则），供新用户快速体验 */
+    @PostMapping("/sample")
+    public Result<Project> createSample() {
+        return Result.ok(projectService.createSample());
+    }
+
     @GetMapping("/{id}")
     public Result<Project> get(@PathVariable Long id) {
         return Result.ok(projectService.get(id));

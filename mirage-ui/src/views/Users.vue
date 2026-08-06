@@ -47,7 +47,7 @@
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="onSave">保存</el-button>
       </template>
     </el-dialog>
 
@@ -72,6 +72,7 @@ import { api } from '../api'
 
 const list = ref([])
 const loading = ref(false)
+const saving = ref(false)
 
 const formVisible = ref(false)
 const form = reactive({ id: null, username: '', nickname: '', password: '', isAdmin: 0, status: 1 })
@@ -107,16 +108,23 @@ async function onSave() {
     if (!form.password || !form.password.trim()) { ElMessage.warning('请输入密码'); return }
   }
   const payload = { nickname: form.nickname, isAdmin: form.isAdmin, status: form.status }
-  if (form.id) {
-    await api.users.update(form.id, payload)
-  } else {
-    payload.username = form.username
-    payload.password = form.password
-    await api.users.create(payload)
+  saving.value = true
+  try {
+    if (form.id) {
+      await api.users.update(form.id, payload)
+    } else {
+      payload.username = form.username
+      payload.password = form.password
+      await api.users.create(payload)
+    }
+    ElMessage.success('已保存')
+    formVisible.value = false
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
   }
-  ElMessage.success('已保存')
-  formVisible.value = false
-  load()
 }
 
 function openReset(row) {

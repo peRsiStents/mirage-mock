@@ -12,6 +12,7 @@ import com.miragemock.dsl.eval.ExprException;
 import com.miragemock.dsl.eval.ExpressionEvaluator;
 import com.miragemock.dsl.spi.SecretResolver;
 import com.miragemock.dsl.spi.SeqProvider;
+import com.miragemock.admin.security.ProjectAuthz;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,14 +34,16 @@ public class FileTemplateService {
     private final ExpressionEvaluator evaluator;
     private final SecretResolver secretResolver;
     private final SeqProvider seqProvider;
+    private final ProjectAuthz authz;
 
     @Autowired
     public FileTemplateService(FileTemplateMapper mapper, ExpressionEvaluator evaluator,
-                               SecretResolver secretResolver, SeqProvider seqProvider) {
+                               SecretResolver secretResolver, SeqProvider seqProvider, ProjectAuthz authz) {
         this.mapper = mapper;
         this.evaluator = evaluator;
         this.secretResolver = secretResolver;
         this.seqProvider = seqProvider;
+        this.authz = authz;
     }
 
     public List<FileTemplate> list(Long projectId) {
@@ -54,6 +57,7 @@ public class FileTemplateService {
         if (t == null) {
             throw new BizException(ResultCode.NOT_FOUND, "文件模板不存在");
         }
+        authz.requireMember(t.getProjectId());
         return t;
     }
 

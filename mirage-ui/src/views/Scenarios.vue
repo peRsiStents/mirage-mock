@@ -26,7 +26,7 @@
         <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button size="small" type="primary" link @click="openSteps(row)">步骤</el-button>
-            <el-button size="small" type="success" link @click="onRun(row)">运行</el-button>
+            <el-button size="small" type="success" link :loading="runLoading[row.id]" @click="onRun(row)">运行</el-button>
             <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
             <el-button size="small" type="danger" link @click="onRemove(row)">删除</el-button>
           </template>
@@ -54,7 +54,7 @@
       <template #footer>
         <el-button v-if="form.id" type="primary" @click="formVisible = false; openStepsById(form.id)">下一步：编排步骤</el-button>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">{{ form.id ? '保存' : '创建' }}</el-button>
+        <el-button type="primary" :loading="saving" @click="onSave">{{ form.id ? '保存' : '创建' }}</el-button>
       </template>
     </el-dialog>
 
@@ -91,16 +91,22 @@
       <el-button size="small" type="primary" :icon="Plus" style="margin-top:8px" @click="steps.push({ caseId: null, name: '', extract: [], continueOnFail: false, enabled: true })">添加步骤</el-button>
       <template #footer>
         <el-button @click="stepsVisible = false">关闭</el-button>
-        <el-button type="primary" @click="saveSteps">保存步骤</el-button>
+        <el-button type="primary" :loading="stepSaving" @click="saveSteps">保存步骤</el-button>
       </template>
     </el-dialog>
 
     <!-- 运行结果 -->
     <el-dialog v-model="resultVisible" title="场景运行结果" width="880px" top="3vh">
       <div v-if="result">
-        <div style="margin-bottom:8px">
-          <el-tag :type="result.passed ? 'success' : 'danger'">{{ result.passed ? '✓ 通过' : '✗ 失败' }}</el-tag>
-          <span class="muted"> 通过 {{ result.passedSteps }}/{{ result.totalSteps }}，耗时 {{ result.costMs }}ms</span>
+        <div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <el-tag :type="result.passed ? 'success' : 'danger'">{{ result.passed ? '✓ 通过' : '✗ 失败' }}</el-tag>
+            <span class="muted"> 通过 {{ result.passedSteps }}/{{ result.totalSteps }}，耗时 {{ result.costMs }}ms</span>
+          </div>
+          <div v-if="result.recordId" style="display:flex;gap:6px">
+            <el-button size="small" @click="copyShare(result.recordId)">复制分享链接</el-button>
+            <el-button size="small" @click="exportResult">导出 JSON</el-button>
+          </div>
         </div>
         <div v-for="(s, i) in result.steps" :key="i" class="step-result">
           <div>
@@ -131,6 +137,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Top, Bottom } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
+import { copyText } from '../utils/clipboard'
 import ResponseBody from '../components/ResponseBody.vue'
 
 const proj = useProjectStore()
@@ -154,6 +161,9 @@ const steps = ref([])
 
 const resultVisible = ref(false)
 const result = ref(null)
+const saving = ref(false)
+const stepSaving = ref(false)
+const runLoading = reactive({})
 
 function envName(id) { const e = envs.value.find((x) => x.id === id); return e ? e.name : '—' }
 
@@ -181,8 +191,15 @@ function openEdit(row) {
 async function onSave() {
   if (!form.name || !form.name.trim()) { ElMessage.warning('请输入场景名称'); return }
   const payload = { name: form.name, envId: form.envId, onFail: form.onFail, remark: form.remark }
-  if (form.id) { await api.scenarios.update(form.id, payload) } else { const r = await api.scenarios.create(proj.id, payload); form.id = r.data.id }
-  ElMessage.success('已保存'); formVisible.value = false; load()
+  saving.value = true
+  try {
+    if (form.id) { await api.scenarios.update(form.id, payload) } else { const r = await api.scenarios.create(proj.id, payload); form.id = r.data.id }
+    ElMessage.success('已保存'); formVisible.value = false; load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
+  }
 }
 
 async function openSteps(row) {
@@ -203,22 +220,34 @@ function move(i, delta) {
 
 async function saveSteps() {
   if (!curScenario.value) return
+  const emptyStep = steps.value.find((s) => s.enabled && !s.caseId)
+  if (emptyStep) { ElMessage.warning('存在「已启用」的步骤未选择测试用例，请先选择或禁用该步骤'); return }
   const payload = steps.value.map((s, i) => ({
     seq: i + 1, caseId: s.caseId, name: s.name,
     extract: JSON.stringify(s.extract || []),
     continueOnFail: s.continueOnFail ? 1 : 0, enabled: s.enabled ? 1 : 0
   }))
-  await api.scenarios.saveSteps(curScenario.value.id, payload)
-  ElMessage.success('步骤已保存')
+  stepSaving.value = true
+  try {
+    await api.scenarios.saveSteps(curScenario.value.id, payload)
+    ElMessage.success('步骤已保存')
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    stepSaving.value = false
+  }
 }
 
 async function onRun(row) {
+  runLoading[row.id] = true
   try {
     const res = await api.scenarios.run(row.id, row.envId)
     result.value = res.data
     resultVisible.value = true
   } catch (e) {
-    ElMessage.error('运行失败：' + (e?.response?.data?.message || e.message || ''))
+    /* 拦截器已提示 */
+  } finally {
+    runLoading[row.id] = false
   }
 }
 
@@ -229,6 +258,22 @@ async function onRemove(row) {
 
 function parseArr(s) { try { return JSON.parse(s || '[]') } catch (e) { return [] } }
 function short(v) { const s = String(v); return s.length > 80 ? s.slice(0, 80) + '…' : s }
+
+async function copyShare(recordId) {
+  const url = window.location.origin + window.location.pathname + '#/reports?recordId=' + recordId
+  await copyText(url)
+  ElMessage.success('分享链接已复制（可在「测试报告」页打开）')
+}
+function exportResult() {
+  if (!result.value) return
+  const blob = new Blob([JSON.stringify(result.value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = 'run-' + (result.value.recordId || 'result') + '.json'
+  document.body.appendChild(a); a.click(); document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  ElMessage.success('已导出 JSON')
+}
 
 watch(() => proj.id, load)
 onMounted(load)

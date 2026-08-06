@@ -27,7 +27,19 @@
           <textarea ref="tplArea" v-model="templateText" class="tpl-textarea" spellcheck="false"></textarea>
           <div class="tpl-toolbar">
             <el-button size="small" type="primary" @click="onPreview" :loading="previewing">试算预览</el-button>
-            <span class="hint">模板为 JSON：HTTP 用 {status,headers,body}；TCP 直接写字段树</span>
+            <el-dropdown trigger="click" @command="applyPreset">
+              <el-button size="small">快速模板 ▾</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :command="0">成功 200</el-dropdown-item>
+                  <el-dropdown-item :command="1">分页列表</el-dropdown-item>
+                  <el-dropdown-item :command="2">业务错误码</el-dropdown-item>
+                  <el-dropdown-item :command="3">未授权 401</el-dropdown-item>
+                  <el-dropdown-item :command="4">网关超时 504</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <span class="hint">HTTP 模板 {status,headers,body}；TCP 直接写字段树</span>
           </div>
         </el-col>
         <el-col :span="7">
@@ -82,14 +94,14 @@
 
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" @click="onSave">保存</el-button>
+      <el-button type="primary" :loading="saving" @click="onSave">保存</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { api } from '../api'
 import FunctionMarketSidebar from './FunctionMarketSidebar.vue'
@@ -148,6 +160,7 @@ const previewVisible = ref(false)
 const previewing = ref(false)
 const previewText = ref('')
 const contextText = ref('{}')
+const saving = ref(false)
 
 watch(() => props.modelValue, (v) => {
   if (v) hydrate()
@@ -187,6 +200,19 @@ function insertAtCursor(text) {
   const end = el.selectionEnd || 0
   templateText.value = templateText.value.slice(0, start) + text + templateText.value.slice(end)
   nextTick(() => { el.focus(); el.selectionStart = el.selectionEnd = start + text.length })
+}
+
+// 响应模板脚手架：一键灌入常见结构，新手不用从零拼 JSON
+const TPL_PRESETS = [
+  '{\n  "status": 200,\n  "body": {\n    "code": "0000",\n    "msg": "success"\n  }\n}',
+  '{\n  "status": 200,\n  "body": {\n    "code": "0000",\n    "total": ${int(100, 999)},\n    "list": ${repeat(3, { id: ${string(numeric, 8)}, name: ${name.cn} })}\n  }\n}',
+  '{\n  "status": 200,\n  "body": {\n    "code": "9999",\n    "msg": "业务处理失败"\n  }\n}',
+  '{\n  "status": 401,\n  "body": {\n    "code": "401",\n    "msg": "未授权或登录已过期"\n  }\n}',
+  '{\n  "status": 504,\n  "body": {\n    "code": "504",\n    "msg": "Gateway Timeout"\n  }\n}'
+]
+function applyPreset(i) {
+  templateText.value = TPL_PRESETS[i]
+  ElMessage.success('已套用模板，可在此基础上修改')
 }
 
 async function onPreview() {
@@ -242,6 +268,10 @@ function buildPayload() {
 }
 
 async function onSave() {
+  if (!form.value.name || !form.value.name.trim()) {
+    ElMessage.warning('请输入规则名称')
+    return
+  }
   let payload
   try {
     payload = buildPayload()
@@ -249,14 +279,34 @@ async function onSave() {
     ElMessage.error(e.message || '保存失败：请检查响应模板是否为合法 JSON')
     return
   }
-  if (props.rule && props.rule.id) {
-    await api.rules.update(props.rule.id, payload)
-  } else {
-    await api.rules.create(props.interfaceId, payload)
+  // 空匹配条件 = 兜底规则（仅当所有条件都被清空时提示，避免误建）
+  const hasCond = Array.isArray(payload.matchCondition) && payload.matchCondition.some((c) => c.key)
+  if (!hasCond) {
+    try {
+      await ElMessageBox.confirm(
+        '当前没有有效的匹配条件，此规则将作为「兜底规则」（优先级最低、仅当其它规则都不命中时生效）。确认这样保存？',
+        '将保存为兜底规则',
+        { type: 'warning', confirmButtonText: '保存为兜底', cancelButtonText: '回去补充条件' }
+      )
+    } catch (e) {
+      return // 用户取消
+    }
   }
-  ElMessage.success('已保存并即时生效')
-  emit('update:modelValue', false)
-  emit('saved')
+  saving.value = true
+  try {
+    if (props.rule && props.rule.id) {
+      await api.rules.update(props.rule.id, payload)
+    } else {
+      await api.rules.create(props.interfaceId, payload)
+    }
+    ElMessage.success('已保存并即时生效')
+    emit('update:modelValue', false)
+    emit('saved')
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 

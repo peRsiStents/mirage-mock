@@ -23,6 +23,7 @@ import com.miragemock.dsl.eval.ExpressionEvaluator;
 import com.miragemock.dsl.spi.SecretResolver;
 import com.miragemock.dsl.spi.SeqProvider;
 import com.miragemock.admin.security.TestTargetGuard;
+import com.miragemock.admin.security.ProjectAuthz;
 import com.miragemock.tcp.codec.MessageParser;
 import com.miragemock.tcp.codec.MessageParserRegistry;
 import com.miragemock.tcp.frame.FrameEncoder;
@@ -74,13 +75,15 @@ public class TestCaseService {
     private final SeqProvider seqProvider;
     private final MessageParserRegistry parserRegistry;
     private final TestTargetGuard targetGuard;
+    private final ProjectAuthz authz;
 
     @Autowired
     public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestRunRecordMapper recordMapper,
                            TestVariableMapper variableMapper, TestEnvironmentMapper environmentMapper,
                            RestTemplate restTemplate, ExpressionEvaluator evaluator,
                            SecretResolver secretResolver, SeqProvider seqProvider,
-                           MessageParserRegistry parserRegistry, TestTargetGuard targetGuard) {
+                           MessageParserRegistry parserRegistry, TestTargetGuard targetGuard,
+                           ProjectAuthz authz) {
         this.caseMapper = caseMapper;
         this.logMapper = logMapper;
         this.recordMapper = recordMapper;
@@ -92,12 +95,20 @@ public class TestCaseService {
         this.seqProvider = seqProvider;
         this.parserRegistry = parserRegistry;
         this.targetGuard = targetGuard;
+        this.authz = authz;
     }
 
     // ============ CRUD ============
 
     public List<TestCase> list(Long projectId) {
+        // 列表瘦身：只取摘要列，排除 body/headers/query/assertions/dataSet/tcpConfig 等大字段；
+        // 编辑/运行/导出经 get(id) 懒加载全量，避免大量用例(尤其含 base64 文件体)撑爆列表响应。
         return caseMapper.selectList(new LambdaQueryWrapper<TestCase>()
+                .select(TestCase::getId, TestCase::getProjectId, TestCase::getName,
+                        TestCase::getProtocol, TestCase::getMethod, TestCase::getUrl,
+                        TestCase::getBodyType, TestCase::getMode, TestCase::getStatus,
+                        TestCase::getTags, TestCase::getRemark,
+                        TestCase::getCreateTime, TestCase::getUpdateTime)
                 .eq(TestCase::getProjectId, projectId)
                 .orderByDesc(TestCase::getCreateTime));
     }
@@ -107,6 +118,7 @@ public class TestCaseService {
         if (t == null) {
             throw new BizException(ResultCode.NOT_FOUND, "测试案例不存在");
         }
+        authz.requireMember(t.getProjectId());
         return t;
     }
 
@@ -148,6 +160,19 @@ public class TestCaseService {
         get(id);
         logMapper.delete(new LambdaQueryWrapper<TestRunLog>().eq(TestRunLog::getCaseId, id));
         caseMapper.deleteById(id);
+    }
+
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        List<TestCase> cases = caseMapper.selectBatchIds(ids);
+        for (TestCase t : cases) {
+            authz.requireMember(t.getProjectId());
+        }
+        logMapper.delete(new LambdaQueryWrapper<TestRunLog>().in(TestRunLog::getCaseId, ids));
+        caseMapper.deleteBatchIds(ids);
     }
 
     private void normalize(TestCase t) {
@@ -339,7 +364,10 @@ public class TestCaseService {
             byte[] payload = parser.encode(fields, formatConfig);
             byte[] framed = FrameEncoder.encode(payload, frameConfig);
             byte[] resp = tcpRoundTrip(host, port, framed);
-            Map<String, Object> respFields = parser.parse(resp, formatConfig);
+            // 响应去帧：剥离 length_field 长度头/尾部分隔符，避免帧头字节混进解析内容
+            // （否则报文前面会多出帧头字节，如长度头 0x74 被当成正文里的 't'）
+            byte[] respPayload = FrameEncoder.strip(resp, frameConfig);
+            Map<String, Object> respFields = parser.parse(respPayload, formatConfig);
             rr.setBody(JsonUtils.toJson(respFields));
             rr.setHeaders(new HashMap<>());
         } catch (Exception e) {
@@ -825,6 +853,18 @@ public class TestCaseService {
      * 优先级 提取 > 环境 > 项目；环境 baseUrl 注入 __base_url（供相对URL拼接）。
      */
     public EvalContext buildEvalContext(Long projectId, Long envId, Map<String, Object> extraVars) {
+        Map<String, Object> vars = buildBaseVars(projectId, envId);
+        if (extraVars != null) {
+            vars.putAll(extraVars);
+        }
+        return new EvalContext(vars, secretResolver, seqProvider, projectId);
+    }
+
+    /**
+     * 项目变量 + 环境变量(含 baseUrl) 一次性加载为 var.* 映射，供场景多步骤/多数据行复用，
+     * 避免每步、每行重复查库（原 buildEvalContext 每次都查两轮）。
+     */
+    public Map<String, Object> buildBaseVars(Long projectId, Long envId) {
         Map<String, Object> vars = new HashMap<>();
         for (TestVariable v : variableMapper.selectList(new LambdaQueryWrapper<TestVariable>()
                 .eq(TestVariable::getProjectId, projectId))) {
@@ -846,10 +886,12 @@ public class TestCaseService {
                 }
             }
         }
-        if (extraVars != null) {
-            vars.putAll(extraVars);
-        }
-        return new EvalContext(vars, secretResolver, seqProvider, projectId);
+        return vars;
+    }
+
+    /** 用预置变量映射构造求值上下文（场景复用 buildBaseVars 结果，每步只 new 一份副本注入运行时变量）。 */
+    public EvalContext newContext(Long projectId, Map<String, Object> vars) {
+        return new EvalContext(vars == null ? new HashMap<>() : vars, secretResolver, seqProvider, projectId);
     }
 
     /** 求值含 ${...} 的字段（${var.x} / DSL 函数）；无 ${...} 原样返回 */

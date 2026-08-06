@@ -40,9 +40,11 @@
           <el-table-column label="状态" width="80">
             <template #default="{ row }"><el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '停用' }}</el-tag></template>
           </el-table-column>
-          <el-table-column label="操作" width="220">
+          <el-table-column label="操作" width="330">
             <template #default="{ row }">
+              <el-button v-if="row.protocol === 'HTTP'" size="small" type="success" link :loading="trying[row.id]" @click.stop="onTryMock(row)">试跑</el-button>
               <el-button size="small" type="primary" link @click.stop="openEditInterface(row)">编辑</el-button>
+              <el-button size="small" link @click.stop="onCloneInterface(row)" title="克隆接口及其全部规则">复制</el-button>
               <el-button size="small" type="danger" link @click.stop="onRemoveInterface(row)">删除</el-button>
             </template>
           </el-table-column>
@@ -53,10 +55,16 @@
         <template #header>
           <div class="card-header">
             <span>规则 <el-tag size="small">{{ currentInterface.name }}</el-tag></span>
-            <el-button type="primary" :icon="Plus" size="small" @click="openCreateRule">新建规则</el-button>
+            <div>
+              <el-button size="small" :disabled="!selectedRules.length" @click="onBatchStatus(1)">批量启用</el-button>
+              <el-button size="small" :disabled="!selectedRules.length" @click="onBatchStatus(0)">批量停用</el-button>
+              <el-button type="danger" size="small" :icon="Delete" :disabled="!selectedRules.length" @click="onBatchRemoveRules">批量删除<span v-if="selectedRules.length">（{{ selectedRules.length }}）</span></el-button>
+              <el-button type="primary" :icon="Plus" size="small" @click="openCreateRule">新建规则</el-button>
+            </div>
           </div>
         </template>
-        <el-table :data="rules" border size="small">
+        <el-table :data="rules" border size="small" @selection-change="onRuleSelectionChange">
+          <el-table-column type="selection" width="42" />
           <template #empty>
             <el-empty description="暂无规则" :image-size="60">
               <el-button type="primary" size="small" @click="openCreateRule">新建规则</el-button>
@@ -75,9 +83,12 @@
               <el-switch :model-value="row.status === 1" @change="toggleRule(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="160">
-            <template #default="{ row }">
+          <el-table-column label="操作" width="310">
+            <template #default="{ row, $index }">
+              <el-button size="small" link :icon="Top" :disabled="$index === 0" title="上移（更优先）" @click="moveRule($index, -1)" />
+              <el-button size="small" link :icon="Bottom" :disabled="$index === rules.length - 1" title="下移" @click="moveRule($index, 1)" />
               <el-button size="small" type="primary" link @click="openEditRule(row)">编辑</el-button>
+              <el-button size="small" link @click="onCloneRule(row)" title="基于此规则新建一条">复制</el-button>
               <el-button size="small" type="danger" link @click="onRemoveRule(row)">删除</el-button>
             </template>
           </el-table-column>
@@ -121,23 +132,32 @@
       </el-form>
       <template #footer>
         <el-button @click="ifaceVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveInterface">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="saveInterface">保存</el-button>
       </template>
     </el-dialog>
 
     <RuleEditor v-model="ruleVisible" :rule="currentRule" :interface-id="currentInterface ? currentInterface.id : 0" :project-id="proj.id" @saved="loadRules" />
+
+    <el-dialog v-model="tryVisible" title="Mock 试跑" width="720px">
+      <div v-if="tryResult" style="margin-bottom:8px">
+        <el-tag :type="sTag(tryResult.status)">HTTP {{ tryResult.status }}</el-tag>
+        <span class="mono" style="margin-left:8px;color:#909399;font-size:12px">{{ tryResult.url }}</span>
+      </div>
+      <ResponseBody v-if="tryResult" :body="tryResult.body" />
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, CopyDocument, Delete, Top, Bottom } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
 import { copyText as copy } from '../utils/clipboard'
 import { pinyin } from 'pinyin-pro'
 import RuleEditor from '../components/RuleEditor.vue'
+import ResponseBody from '../components/ResponseBody.vue'
 
 const proj = useProjectStore()
 const interfaces = ref([])
@@ -157,6 +177,8 @@ const ifaceForm = reactive({ id: null, name: '', protocol: 'HTTP', httpMethod: '
 
 const ruleVisible = ref(false)
 const currentRule = ref(null)
+const saving = ref(false)
+const selectedRules = ref([])
 
 // Mock 访问端口（来自后端 /system/info），用于拼装可复制的访问链接
 const mockPort = ref(0)
@@ -248,14 +270,21 @@ function openEditInterface(row) {
 async function saveInterface() {
   if (!ifaceForm.name || !ifaceForm.name.trim()) { ElMessage.warning('请输入接口名称'); return }
   if (ifaceForm.protocol !== 'TCP' && (!ifaceForm.httpPath || !ifaceForm.httpPath.trim())) { ElMessage.warning('请输入接口路径'); return }
-  if (ifaceForm.id) {
-    await api.interfaces.update(ifaceForm.id, { ...ifaceForm })
-  } else {
-    await api.interfaces.create(proj.id, { ...ifaceForm })
+  saving.value = true
+  try {
+    if (ifaceForm.id) {
+      await api.interfaces.update(ifaceForm.id, { ...ifaceForm })
+    } else {
+      await api.interfaces.create(proj.id, { ...ifaceForm })
+    }
+    ElMessage.success('已保存并即时生效')
+    ifaceVisible.value = false
+    loadInterfaces()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
   }
-  ElMessage.success('已保存并即时生效')
-  ifaceVisible.value = false
-  loadInterfaces()
 }
 
 async function onRemoveInterface(row) {
@@ -283,9 +312,99 @@ async function onRemoveRule(row) {
   loadRules()
 }
 
+function onRuleSelectionChange(rows) { selectedRules.value = rows }
+async function onBatchRemoveRules() {
+  if (!selectedRules.value.length) return
+  await ElMessageBox.confirm(`确认删除选中的 ${selectedRules.value.length} 条规则？`, '批量删除', { type: 'warning' })
+  try {
+    await api.rules.removeBatch(selectedRules.value.map((r) => r.id))
+    ElMessage.success('已删除 ' + selectedRules.value.length + ' 条')
+    selectedRules.value = []
+    loadRules()
+  } catch (e) {
+    /* 拦截器已提示 */
+  }
+}
+
+async function onBatchStatus(status) {
+  if (!selectedRules.value.length) return
+  try {
+    await api.rules.setBatchStatus(selectedRules.value.map((r) => r.id), status)
+    ElMessage.success((status === 1 ? '已启用 ' : '已停用 ') + selectedRules.value.length + ' 条')
+    selectedRules.value = []
+    loadRules()
+  } catch (e) {
+    /* 拦截器已提示 */
+  }
+}
+
+async function moveRule(index, delta) {
+  const j = index + delta
+  if (j < 0 || j >= rules.value.length) return
+  const a = rules.value[index], b = rules.value[j]
+  const pa = a.priority ?? 100, pb = b.priority ?? 100
+  try {
+    if (pa === pb) {
+      // 优先级相同：直接给移动方更小(上)/更大(下)的值打破平局
+      await api.rules.setPriority(a.id, pa + delta)
+    } else {
+      await api.rules.setPriority(a.id, pb)
+      await api.rules.setPriority(b.id, pa)
+    }
+    ElMessage.success('已调整顺序')
+    loadRules()
+  } catch (e) {
+    /* 拦截器已提示 */
+  }
+}
+
 async function toggleRule(row) {
   await api.rules.toggle(row.id)
   loadRules()
+}
+
+// ===== Mock 页内试跑（HTTP 接口直接 fetch 自家 mockUrl，看命中规则与返回）=====
+const trying = reactive({})
+const tryVisible = ref(false)
+const tryResult = ref(null)
+function sTag(s) { return s >= 200 && s < 300 ? 'success' : (s >= 400 ? 'danger' : 'info') }
+async function onTryMock(row) {
+  const url = mockUrl(row)
+  if (!url) { ElMessage.warning('无法生成 Mock 访问地址（HTTP 端口未开启？）'); return }
+  trying[row.id] = true
+  try {
+    const resp = await fetch(url, { method: 'GET' })
+    const text = await resp.text()
+    tryResult.value = { status: resp.status, body: text, url }
+    tryVisible.value = true
+  } catch (e) {
+    ElMessage.error('试跑失败：' + (e?.message || '网络错误'))
+  } finally {
+    trying[row.id] = false
+  }
+}
+
+// ===== 一键克隆 =====
+function onCloneRule(row) {
+  currentRule.value = { ...row, id: null, name: (row.name || '') + '(副本)' }
+  ruleVisible.value = true
+}
+
+async function onCloneInterface(row) {
+  try {
+    const { id, createTime, updateTime, ...rest } = row
+    const res = await api.interfaces.create(proj.id, { ...rest, name: (row.name || '') + '(副本)' })
+    const newId = res.data.id
+    const rr = await api.rules.list(row.id)
+    for (const r of (rr.data || [])) {
+      const { id: _id, interfaceId: _iid, createTime: _c, updateTime: _u, ...rrest } = r
+      await api.rules.create(newId, { ...rrest, name: (r.name || '') + '(副本)' })
+    }
+    ElMessage.success('已克隆接口及 ' + (rr.data?.length || 0) + ' 条规则')
+    loadInterfaces()
+  } catch (e) {
+    /* 拦截器已提示 */
+  }
 }
 
 watch(() => proj.id, () => { currentInterface.value = null; loadInterfaces() })

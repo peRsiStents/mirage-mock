@@ -9,7 +9,7 @@
           <span>密钥管理 <el-tag size="small">{{ proj.name }}</el-tag></span>
           <div>
             <el-input v-model="sm2Alias" placeholder="SM2 别名" style="width: 160px; margin-right: 8px" />
-            <el-button type="success" @click="genSm2">服务端生成 SM2</el-button>
+            <el-button type="success" :loading="genLoading" @click="genSm2">服务端生成 SM2</el-button>
             <el-button type="primary" :icon="Plus" @click="openCreate">录入密钥</el-button>
           </div>
         </div>
@@ -36,7 +36,7 @@
 
     <el-dialog v-model="formVisible" title="录入密钥" width="560px">
       <el-form :model="form" label-width="80px">
-        <el-form-item label="别名"><el-input v-model="form.alias" /></el-form-item>
+        <el-form-item label="别名"><el-input v-model="form.alias" placeholder="如 RSA_PROD，表达式 ${sm2(...,'别名')} 会引用它" /></el-form-item>
         <el-form-item label="算法">
           <el-select v-model="form.algorithm">
             <el-option label="SM2（非对称）" value="SM2" />
@@ -51,7 +51,7 @@
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">保存（私钥加密落库）</el-button>
+        <el-button type="primary" :loading="saving" @click="onSave">保存（私钥加密落库）</el-button>
       </template>
     </el-dialog>
 
@@ -84,6 +84,8 @@ const isAsym = computed(() => form.algorithm === 'SM2' || form.algorithm === 'RS
 
 const resultVisible = ref(false)
 const result = reactive({ alias: '', publicKey: '', privateKey: '' })
+const saving = ref(false)
+const genLoading = ref(false)
 
 async function load() {
   if (!proj.id) return
@@ -103,10 +105,25 @@ function openCreate() {
 
 async function onSave() {
   if (!form.alias || !form.alias.trim()) { ElMessage.warning('请输入密钥别名'); return }
-  await api.keys.create(proj.id, { ...form })
-  ElMessage.success('已保存')
-  formVisible.value = false
-  load()
+  const algo = form.algorithm
+  const pub = (form.publicKey || '').trim()
+  const priv = (form.privateKey || '').trim()
+  if (isAsym.value) {
+    if (!pub && !priv) { ElMessage.warning('非对称密钥请至少填写公钥或私钥（建议两者都填）'); return }
+  } else {
+    if (!priv) { ElMessage.warning('请填写对称密钥（' + algo + ' 通常为 16 字节）'); return }
+  }
+  saving.value = true
+  try {
+    await api.keys.create(proj.id, { ...form })
+    ElMessage.success('已保存')
+    formVisible.value = false
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    saving.value = false
+  }
 }
 
 async function genSm2() {
@@ -114,11 +131,18 @@ async function genSm2() {
     ElMessage.warning('请输入别名')
     return
   }
-  const res = await api.keys.generateSm2(proj.id, sm2Alias.value)
-  Object.assign(result, res.data)
-  resultVisible.value = true
-  sm2Alias.value = ''
-  load()
+  genLoading.value = true
+  try {
+    const res = await api.keys.generateSm2(proj.id, sm2Alias.value)
+    Object.assign(result, res.data)
+    resultVisible.value = true
+    sm2Alias.value = ''
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    genLoading.value = false
+  }
 }
 
 async function onRemove(row) {

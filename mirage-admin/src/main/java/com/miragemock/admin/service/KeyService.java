@@ -10,6 +10,7 @@ import com.miragemock.common.entity.SecretKey;
 import com.miragemock.common.exception.BizException;
 import com.miragemock.dsl.crypto.Codec;
 import com.miragemock.dsl.crypto.SmCrypto;
+import com.miragemock.admin.security.ProjectAuthz;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -20,11 +21,13 @@ public class KeyService {
 
     private final SecretKeyMapper keyMapper;
     private final SecretCipher cipher;
+    private final ProjectAuthz authz;
 
     @Autowired
-    public KeyService(SecretKeyMapper keyMapper, SecretCipher cipher) {
+    public KeyService(SecretKeyMapper keyMapper, SecretCipher cipher, ProjectAuthz authz) {
         this.keyMapper = keyMapper;
         this.cipher = cipher;
+        this.authz = authz;
     }
 
     public List<SecretKey> list(Long projectId) {
@@ -40,6 +43,27 @@ public class KeyService {
         SecretKey k = keyMapper.selectById(id);
         if (k == null) {
             throw new BizException(ResultCode.KEY_NOT_FOUND);
+        }
+        authz.requireMember(k.getProjectId());
+        return k;
+    }
+
+    /**
+     * 工具市场按 id 解析密钥：返回公钥 + 解密后的私钥/对称密钥 + IV，供加解密工具
+     * 「引用项目密钥」直接计算，免去粘贴。私钥仅在服务端内存中使用、不回前端
+     * （列表/详情接口仍不会泄露私钥）。null 入参返回 null（表示未引用）。
+     */
+    public SecretKey resolveForTool(Long id) {
+        if (id == null) {
+            return null;
+        }
+        SecretKey k = keyMapper.selectById(id);
+        if (k == null) {
+            throw new BizException(ResultCode.KEY_NOT_FOUND);
+        }
+        authz.requireMember(k.getProjectId());
+        if (k.getPrivateKey() != null && !k.getPrivateKey().isEmpty()) {
+            k.setPrivateKey(cipher.decrypt(k.getPrivateKey()));
         }
         return k;
     }

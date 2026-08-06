@@ -54,8 +54,8 @@ public class LogService {
         this.projectMapper = projectMapper;
     }
 
-    public PageResult<MockRequestLog> query(Long projectId, Long interfaceId, Integer matched,
-                                            Long from, Long to, long page, long size) {
+    public PageResult<MockRequestLog> query(Long projectId, Long interfaceId, Integer matched, String protocol,
+                                            String keyword, Long from, Long to, long page, long size) {
         if (page < 1) {
             page = 1;
         }
@@ -72,6 +72,13 @@ public class LogService {
         if (matched != null) {
             wrapper.eq(MockRequestLog::getMatched, matched);
         }
+        if (protocol != null && !protocol.isEmpty()) {
+            wrapper.eq(MockRequestLog::getProtocol, protocol);
+        }
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            // 请求原文含 方法/路径/头/体，关键字模糊匹配它即可定位
+            wrapper.like(MockRequestLog::getRequestRaw, keyword.trim());
+        }
         if (from != null) {
             wrapper.ge(MockRequestLog::getCreateTime, toLocalDateTime(from));
         }
@@ -79,10 +86,23 @@ public class LogService {
             wrapper.le(MockRequestLog::getCreateTime, toLocalDateTime(to));
         }
         wrapper.orderByDesc(MockRequestLog::getCreateTime);
+        // 列表瘦身：不回传 requestRaw/requestParsed/responseRaw 三段大文本，详情按需走 get(logId)
+        wrapper.select(MockRequestLog::getId, MockRequestLog::getProjectId, MockRequestLog::getInterfaceId,
+                MockRequestLog::getRuleId, MockRequestLog::getProtocol, MockRequestLog::getClientAddr,
+                MockRequestLog::getMatched, MockRequestLog::getCostMs, MockRequestLog::getCreateTime);
 
         Page<MockRequestLog> result = logMapper.selectPage(new Page<>(page, size), wrapper);
         enrichNames(result.getRecords());
         return PageResult.of(result.getRecords(), result.getTotal(), page, size);
+    }
+
+    /** 单条完整日志（含三段原文），供详情弹窗按需懒加载，避免列表全量回传大文本。 */
+    public MockRequestLog get(Long logId) {
+        MockRequestLog lg = logMapper.selectById(logId);
+        if (lg == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "日志不存在");
+        }
+        return lg;
     }
 
     /** 回填项目/接口/规则名称，前端展示名称而非 id */
