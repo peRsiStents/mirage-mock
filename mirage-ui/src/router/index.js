@@ -43,7 +43,7 @@ function updateTitle(to) {
 router.beforeEach((to) => {
   const auth = useAuthStore()
   if (!auth.token && to.name !== 'login') {
-    return { name: 'login' }
+    return { name: 'login', query: to.fullPath && to.fullPath !== '/' ? { redirect: to.fullPath } : undefined }
   }
   if (to.meta?.admin && !auth.isAdmin) {
     return { path: '/dashboard' }

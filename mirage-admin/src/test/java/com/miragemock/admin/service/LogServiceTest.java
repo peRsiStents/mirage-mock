@@ -13,7 +13,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class LogServiceTest {
 
-    private final LogService svc = new LogService(null, null, null, null);
+    // 第 5 个参数 ProjectAuthz 仅 get()/query() 鉴权用，解析器不依赖，传 null
+    private final LogService svc = new LogService(null, null, null, null, null);
 
     private MockRequestLog logOf(String raw) {
         MockRequestLog l = new MockRequestLog();

@@ -2,7 +2,10 @@ package com.miragemock.admin.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.miragemock.admin.dto.EvaluateRequest;
+import com.miragemock.admin.security.ProjectAuthz;
 import com.miragemock.common.api.Result;
+import com.miragemock.common.api.ResultCode;
+import com.miragemock.common.exception.BizException;
 import com.miragemock.common.util.JsonUtils;
 import com.miragemock.core.engine.MockEngine;
 import com.miragemock.core.render.RenderedResponse;
@@ -23,14 +26,21 @@ import java.util.Map;
 public class TemplateController {
 
     private final MockEngine engine;
+    private final ProjectAuthz authz;
 
     @Autowired
-    public TemplateController(MockEngine engine) {
+    public TemplateController(MockEngine engine, ProjectAuthz authz) {
         this.engine = engine;
+        this.authz = authz;
     }
 
     @PostMapping("/evaluate")
     public Result<RenderedResponse> evaluate(@RequestBody EvaluateRequest request) {
+        if (request.getProjectId() == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "projectId 不能为空");
+        }
+        // 模板可调用 ${sm*_encrypt(..,'别名')} / ${seq(..)} 等带项目上下文函数，须校验项目成员
+        authz.requireMember(request.getProjectId());
         JsonNode node = request.getTemplate() == null
                 ? null
                 : JsonUtils.mapper().valueToTree(request.getTemplate());

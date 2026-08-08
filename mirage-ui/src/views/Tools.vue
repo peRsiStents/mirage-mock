@@ -501,12 +501,13 @@ function genRsa() {
 
 // ---- 输入/配置持久化到 localStorage（刷新不丢，常用工具免重填密钥/原文）----
 const PERSIST_KEY = 'mirage_tools_state'
+// 仅持久化非敏感项（原文/缩进/模式/公钥等）；私钥与对称密钥不入 localStorage，避免共用机器/泄露
 const persistRefs = {
   tab, jsonIn, xmlIn, sqlIn, encIn, encMode, hashAlgo, uuidCount, uuidUpper,
   jsonIndent, xmlIndent,
-  sm3In, sm3OutEnc, sm4In, sm4Key, sm4Iv, sm4Mode, sm4KeyEnc, sm4Enc,
-  sm2In, sm2Pub, sm2Priv, sm2Sig, sm2Enc,
-  rsaIn, rsaPub, rsaPriv, rsaSig, rsaBits
+  sm3In, sm3OutEnc, sm4In, sm4Mode, sm4KeyEnc, sm4Enc,
+  sm2In, sm2Pub, sm2Enc,
+  rsaIn, rsaPub, rsaBits
 }
 try {
   const saved = JSON.parse(localStorage.getItem(PERSIST_KEY) || '{}')

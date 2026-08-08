@@ -66,6 +66,8 @@ public class ScenarioController {
     /** 运行场景（可选 envId 覆盖默认环境） */
     @PostMapping("/scenarios/{id}/run")
     public Result<ScenarioRunResult> run(@PathVariable Long id, @RequestParam(required = false) Long envId) {
+        // 成员鉴权放在 web 入口：runScenario 也被 CI(token)/调度(系统线程)以无 AuthContext 方式调用，内部不能加鉴权
+        service.get(id);
         return Result.ok(service.runScenario(id, envId));
     }
 }

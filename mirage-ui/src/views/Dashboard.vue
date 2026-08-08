@@ -34,6 +34,7 @@
                 <div class="metric">
                   <div class="metric-num">{{ data.logToday || 0 }}</div>
                   <div class="metric-label">今日请求</div>
+                  <div class="metric-sub" :class="{ 'num-danger': (data.matchedRateToday != null) && data.matchedRateToday < 100 && data.logToday > 0 }">命中 {{ data.matchedRateToday ?? 0 }}%</div>
                 </div>
               </el-col>
               <el-col :span="6">
@@ -86,6 +87,51 @@
       </el-row>
 
       <el-row :gutter="12" style="margin-top:12px">
+        <!-- 近 7 天趋势 -->
+        <el-col :span="15">
+          <el-card shadow="never">
+            <template #header><span>近 7 天趋势</span></template>
+            <div class="trend-row">
+              <div class="trend-item">
+                <div class="trend-label">请求量（今日 {{ reqToday }}）</div>
+                <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none">
+                  <polyline :points="linePoints(reqSeries, 200, 44)" fill="none" stroke="#409eff" stroke-width="2" />
+                </svg>
+              </div>
+              <div class="trend-item">
+                <div class="trend-label">命中率（今日 {{ data.matchedRateToday ?? 0 }}%）</div>
+                <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none">
+                  <polyline :points="linePoints(hitSeries, 200, 44)" fill="none" stroke="#67c23a" stroke-width="2" />
+                </svg>
+              </div>
+              <div class="trend-item">
+                <div class="trend-label">测试通过率（{{ passToday != null ? passToday + '%' : '今日无运行' }}）</div>
+                <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none">
+                  <polyline :points="linePoints(passSeries, 200, 44)" fill="none" stroke="#e6a23c" stroke-width="2" />
+                </svg>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+
+        <!-- 近 7 天失败最多 -->
+        <el-col :span="9">
+          <el-card shadow="never">
+            <template #header><span>近 7 天失败最多</span></template>
+            <el-table :data="data.topFailCases || []" size="small" :show-header="false">
+              <template #empty><div class="muted-sm">近 7 天无失败用例 🎉</div></template>
+              <el-table-column>
+                <template #default="{ row }"><span class="mono">{{ row.caseName }}</span></template>
+              </el-table-column>
+              <el-table-column width="70" align="right">
+                <template #default="{ row }"><el-tag size="small" type="danger">{{ row.failCount }}次</el-tag></template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <el-row :gutter="12" style="margin-top:12px">
         <!-- 最近 Mock 请求 -->
         <el-col :span="24">
           <el-card shadow="never">
@@ -125,6 +171,31 @@ const router = useRouter()
 const proj = useProjectStore()
 const loading = ref(false)
 const data = ref({})
+const trend = ref([])
+
+// 趋势序列（请求量 / 命中率 / 通过率）
+const reqSeries = computed(() => trend.value.map((t) => t.requests))
+const hitSeries = computed(() => trend.value.map((t) => t.hitRate))
+const passSeries = computed(() => trend.value.map((t) => (t.runPassRate == null ? 0 : t.runPassRate)))
+const reqToday = computed(() => { const a = reqSeries.value; return a.length ? a[a.length - 1] : 0 })
+const passToday = computed(() => {
+  const a = trend.value
+  if (!a.length) return null
+  const last = a[a.length - 1].runPassRate
+  return last == null ? null : last
+})
+
+/** 数组 → SVG polyline points（自适应 min/max 映射到 w×h） */
+function linePoints(arr, w, h) {
+  if (!arr.length) return ''
+  const max = Math.max(...arr, 1)
+  const min = Math.min(...arr, 0)
+  const range = max - min || 1
+  const step = arr.length > 1 ? w / (arr.length - 1) : 0
+  return arr
+    .map((v, i) => (i * step).toFixed(1) + ',' + (h - ((v - min) / range) * h).toFixed(1))
+    .join(' ')
+}
 
 const stats = computed(() => [
   { key: 'iface', label: 'HTTP 接口', value: data.value.interfaceCount || 0, icon: Connection, color: '#409eff', route: '/interfaces' },
@@ -153,8 +224,19 @@ async function load() {
   try {
     const res = await api.dashboard.overview(proj.id)
     data.value = res.data || {}
+    loadTrend()
   } finally {
     loading.value = false
+  }
+}
+
+async function loadTrend() {
+  if (!proj.id) return
+  try {
+    const res = await api.dashboard.trend(proj.id, 7)
+    trend.value = res.data || []
+  } catch (e) {
+    trend.value = []
   }
 }
 
@@ -211,6 +293,11 @@ onMounted(load)
 .metric { text-align: center; }
 .metric-num { font-size: 26px; font-weight: 700; color: #303133; }
 .metric-label { font-size: 12px; color: #909399; margin-top: 4px; }
+.metric-sub { font-size: 12px; color: #67c23a; margin-top: 2px; }
+.trend-row { display: flex; gap: 18px; }
+.trend-item { flex: 1; }
+.trend-label { font-size: 12px; color: #606266; margin-bottom: 6px; }
+.spark { width: 100%; height: 44px; display: block; }
 .num-ok { color: #67c23a; }
 .num-warn { color: #e6a23c; }
 .num-danger { color: #f56c6c; }

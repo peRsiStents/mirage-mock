@@ -97,6 +97,7 @@ public class FileTemplateService {
     /** 生成完整文件文本（rowCount 行 + 可选首行） */
     public GeneratedFile generate(FileGenRequest req) {
         normalizeReq(req);
+        authz.requireMember(req.getProjectId());
         EvalContext ctx = newContext(req.getProjectId());
         ctx.getVariables().put("count", req.getRowCount());
         String sep = "LF".equalsIgnoreCase(req.getLineSeparator()) ? "\n" : "\r\n";
@@ -114,6 +115,7 @@ public class FileTemplateService {
     /** 预览：首行 + 前若干行（注意：含 ${seq} 时预览也会消费序列值） */
     public List<String> preview(FileGenRequest req) {
         normalizeReq(req);
+        authz.requireMember(req.getProjectId());
         EvalContext ctx = newContext(req.getProjectId());
         ctx.getVariables().put("count", req.getRowCount());
         List<String> lines = new ArrayList<>();

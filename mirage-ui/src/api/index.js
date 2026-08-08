@@ -99,7 +99,8 @@ export const api = {
     info: () => http.get('/system/info')
   },
   dashboard: {
-    overview: (pid) => http.get(`/projects/${pid}/dashboard`)
+    overview: (pid) => http.get(`/projects/${pid}/dashboard`),
+    trend: (pid, days) => http.get(`/projects/${pid}/dashboard/trend`, { params: { days } })
   },
   users: {
     list: () => http.get('/users'),
@@ -112,8 +113,8 @@ export const api = {
     create: (pid, t) => http.post(`/projects/${pid}/file-templates`, t),
     update: (id, t) => http.put(`/file-templates/${id}`, t),
     remove: (id) => http.delete(`/file-templates/${id}`),
-    preview: (payload) => http.post('/file-templates/preview', payload),
-    generate: (payload) => http.post('/file-templates/generate', payload, { responseType: 'blob' })
+    preview: (payload) => http.post('/file-templates/preview', payload, { timeout: 300000 }),
+    generate: (payload) => http.post('/file-templates/generate', payload, { responseType: 'blob', timeout: 300000 })
   },
   testCases: {
     list: (pid) => http.get(`/projects/${pid}/testcases`),
@@ -122,8 +123,8 @@ export const api = {
     update: (id, t) => http.put(`/testcases/${id}`, t),
     remove: (id) => http.delete(`/testcases/${id}`),
     removeBatch: (ids) => http.delete('/testcases/batch', { data: ids }),
-    run: (id, envId) => http.post(`/testcases/${id}/run`, null, { params: { envId } }),
-    runData: (id, envId) => http.post(`/testcases/${id}/run-data`, null, { params: { envId } }),
+    run: (id, envId) => http.post(`/testcases/${id}/run`, null, { params: { envId }, timeout: 300000 }),
+    runData: (id, envId) => http.post(`/testcases/${id}/run-data`, null, { params: { envId }, timeout: 300000 }),
     runs: (id) => http.get(`/testcases/${id}/runs`)
   },
   testVariables: {
@@ -145,7 +146,7 @@ export const api = {
     remove: (id) => http.delete(`/scenarios/${id}`),
     steps: (id) => http.get(`/scenarios/${id}/steps`),
     saveSteps: (id, steps) => http.put(`/scenarios/${id}/steps`, steps),
-    run: (id, envId) => http.post(`/scenarios/${id}/run`, null, { params: { envId } })
+    run: (id, envId) => http.post(`/scenarios/${id}/run`, null, { params: { envId }, timeout: 300000 })
   },
   records: {
     query: (pid, params) => http.get(`/projects/${pid}/records`, { params }),

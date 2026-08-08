@@ -25,25 +25,37 @@ public class SecretCipher {
     private static final int IV_LEN = 12;
     private static final int TAG_LEN_BITS = 128;
     private static final String DEFAULT_MASTER_KEY = "mirage-mock-dev-master-key";
+    private static final String DEFAULT_JWT_SECRET = "mirage-mock-dev-jwt-secret-please-change-in-prod-0123456789";
 
     private final SecretKey key;
     private final SecureRandom random = new SecureRandom();
     private final Environment env;
     private final String masterKey;
+    private final SecurityProperties props;
 
     public SecretCipher(SecurityProperties props, Environment env) {
         this.masterKey = props.getMasterKey();
         this.key = new SecretKeySpec(sha256(this.masterKey), "AES");
         this.env = env;
+        this.props = props;
     }
 
-    /** 生产环境强制要求高强度、非默认主密钥，fail-fast 避免零熵加密。 */
+    /** 生产环境强制要求高强度、非默认的主密钥与 JWT 密钥，fail-fast 避免零熵加密/签名被伪造。 */
     @PostConstruct
-    public void validateMasterKey() {
+    public void validateSecrets() {
         boolean prod = Arrays.asList(env.getActiveProfiles()).contains("prod");
-        if (prod && (DEFAULT_MASTER_KEY.equals(masterKey) || masterKey == null || masterKey.length() < 32)) {
+        if (!prod) {
+            return;
+        }
+        if (masterKey == null || masterKey.length() < 32 || DEFAULT_MASTER_KEY.equals(masterKey)) {
             throw new IllegalStateException(
                     "生产环境(prod)必须通过环境变量 MIRAGE_MASTER_KEY 设置高强度主密钥(>=32 字符)且不可使用默认值");
+        }
+        String jwtSecret = props.getJwtSecret();
+        if (jwtSecret == null || jwtSecret.getBytes(StandardCharsets.UTF_8).length < 32
+                || DEFAULT_JWT_SECRET.equals(jwtSecret)) {
+            throw new IllegalStateException(
+                    "生产环境(prod)必须通过环境变量 MIRAGE_JWT_SECRET 设置高强度 JWT 密钥(>=32 字节)且不可使用默认值");
         }
     }
 

@@ -7,6 +7,7 @@ import com.miragemock.admin.dto.RunResult;
 import com.miragemock.admin.mapper.TestCaseMapper;
 import com.miragemock.admin.mapper.TestRunLogMapper;
 import com.miragemock.admin.mapper.TestRunRecordMapper;
+import com.miragemock.admin.mapper.TestScenarioStepMapper;
 import com.miragemock.admin.mapper.TestEnvironmentMapper;
 import com.miragemock.admin.mapper.TestVariableMapper;
 import com.miragemock.common.api.ResultCode;
@@ -14,6 +15,7 @@ import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.TestCase;
 import com.miragemock.common.entity.TestRunLog;
 import com.miragemock.common.entity.TestRunRecord;
+import com.miragemock.common.entity.TestScenarioStep;
 import com.miragemock.common.entity.TestEnvironment;
 import com.miragemock.common.entity.TestVariable;
 import com.miragemock.common.exception.BizException;
@@ -67,6 +69,7 @@ public class TestCaseService {
     private final TestCaseMapper caseMapper;
     private final TestRunLogMapper logMapper;
     private final TestRunRecordMapper recordMapper;
+    private final TestScenarioStepMapper stepMapper;
     private final TestVariableMapper variableMapper;
     private final TestEnvironmentMapper environmentMapper;
     private final RestTemplate restTemplate;
@@ -79,7 +82,8 @@ public class TestCaseService {
 
     @Autowired
     public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestRunRecordMapper recordMapper,
-                           TestVariableMapper variableMapper, TestEnvironmentMapper environmentMapper,
+                           TestScenarioStepMapper stepMapper, TestVariableMapper variableMapper,
+                           TestEnvironmentMapper environmentMapper,
                            RestTemplate restTemplate, ExpressionEvaluator evaluator,
                            SecretResolver secretResolver, SeqProvider seqProvider,
                            MessageParserRegistry parserRegistry, TestTargetGuard targetGuard,
@@ -87,6 +91,7 @@ public class TestCaseService {
         this.caseMapper = caseMapper;
         this.logMapper = logMapper;
         this.recordMapper = recordMapper;
+        this.stepMapper = stepMapper;
         this.variableMapper = variableMapper;
         this.environmentMapper = environmentMapper;
         this.restTemplate = restTemplate;
@@ -158,6 +163,8 @@ public class TestCaseService {
     @Transactional
     public void delete(Long id) {
         get(id);
+        // 级联清理：引用本用例的场景步骤（用例已删则步骤无法运行，按 interface→rule 同模式清掉避免孤儿）
+        stepMapper.delete(new LambdaQueryWrapper<TestScenarioStep>().eq(TestScenarioStep::getCaseId, id));
         logMapper.delete(new LambdaQueryWrapper<TestRunLog>().eq(TestRunLog::getCaseId, id));
         caseMapper.deleteById(id);
     }
@@ -171,6 +178,7 @@ public class TestCaseService {
         for (TestCase t : cases) {
             authz.requireMember(t.getProjectId());
         }
+        stepMapper.delete(new LambdaQueryWrapper<TestScenarioStep>().in(TestScenarioStep::getCaseId, ids));
         logMapper.delete(new LambdaQueryWrapper<TestRunLog>().in(TestRunLog::getCaseId, ids));
         caseMapper.deleteBatchIds(ids);
     }
@@ -938,6 +946,7 @@ public class TestCaseService {
         if (exists == null) {
             throw new BizException(ResultCode.NOT_FOUND, "变量不存在");
         }
+        authz.requireMember(exists.getProjectId());
         if (patch.getVarValue() != null) exists.setVarValue(patch.getVarValue());
         if (patch.getRemark() != null) exists.setRemark(patch.getRemark());
         if (patch.getStatus() != null) exists.setStatus(patch.getStatus());
@@ -947,6 +956,11 @@ public class TestCaseService {
 
     @Transactional
     public void deleteVariable(Long id) {
+        TestVariable exists = variableMapper.selectById(id);
+        if (exists == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "变量不存在");
+        }
+        authz.requireMember(exists.getProjectId());
         variableMapper.deleteById(id);
     }
 

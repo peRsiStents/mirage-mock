@@ -85,7 +85,8 @@ public class RuleService {
             return;
         }
         List<MockRule> rules = ruleMapper.selectBatchIds(ids);
-        ruleMapper.deleteBatchIds(ids);
+        // 先逐条鉴权（interfaceService.get 抛 FORBIDDEN 即整体事务回滚），全部通过后再删，
+        // 避免「先 deleteBatchIds 后鉴权」导致他人规则已被删除却只抛异常。
         Set<Long> projectIds = new HashSet<>();
         for (MockRule r : rules) {
             ApiInterface iface = interfaceService.get(r.getInterfaceId());
@@ -93,6 +94,7 @@ public class RuleService {
                 projectIds.add(iface.getProjectId());
             }
         }
+        ruleMapper.deleteBatchIds(ids);
         for (Long pid : projectIds) {
             ruleCache.invalidate(pid);
         }
@@ -117,14 +119,17 @@ public class RuleService {
             return;
         }
         List<MockRule> rules = ruleMapper.selectBatchIds(ids);
+        // 先逐条鉴权全部通过，再统一改状态（同 deleteBatch，避免半成功）
         Set<Long> projectIds = new HashSet<>();
         for (MockRule r : rules) {
-            r.setStatus(status);
-            ruleMapper.updateById(r);
             ApiInterface iface = interfaceService.get(r.getInterfaceId());
             if (iface != null) {
                 projectIds.add(iface.getProjectId());
             }
+        }
+        for (MockRule r : rules) {
+            r.setStatus(status);
+            ruleMapper.updateById(r);
         }
         for (Long pid : projectIds) {
             ruleCache.invalidate(pid);

@@ -11,6 +11,8 @@ import com.miragemock.common.entity.ApiInterface;
 import com.miragemock.common.entity.MockRule;
 import com.miragemock.common.entity.Project;
 import com.miragemock.common.entity.ProjectMember;
+import com.miragemock.common.entity.TcpListener;
+import com.miragemock.common.entity.TestSchedule;
 import com.miragemock.common.exception.BizException;
 import com.miragemock.core.cache.RuleCache;
 import com.miragemock.admin.security.AuthContext;
@@ -34,17 +36,24 @@ public class ProjectService {
     private final MockRuleMapper ruleMapper;
     private final RuleCache ruleCache;
     private final ProjectAuthz authz;
+    private final TcpListenerService tcpListenerService;
+    private final ScheduleService scheduleService;
+    private final ProjectDataCleaner cascadeCleaner;
 
     @Autowired
     public ProjectService(ProjectMapper projectMapper, ProjectMemberMapper memberMapper,
                           ApiInterfaceMapper interfaceMapper, MockRuleMapper ruleMapper, RuleCache ruleCache,
-                          ProjectAuthz authz) {
+                          ProjectAuthz authz, TcpListenerService tcpListenerService, ScheduleService scheduleService,
+                          ProjectDataCleaner cascadeCleaner) {
         this.projectMapper = projectMapper;
         this.memberMapper = memberMapper;
         this.interfaceMapper = interfaceMapper;
         this.ruleMapper = ruleMapper;
         this.ruleCache = ruleCache;
         this.authz = authz;
+        this.tcpListenerService = tcpListenerService;
+        this.scheduleService = scheduleService;
+        this.cascadeCleaner = cascadeCleaner;
     }
 
     public List<Project> list() {
@@ -126,14 +135,15 @@ public class ProjectService {
     @Transactional
     public void delete(Long id) {
         authz.requireAdmin(id);
-        // 级联清理接口与规则
-        List<ApiInterface> interfaces = interfaceMapper.selectList(
-                new LambdaQueryWrapper<ApiInterface>().eq(ApiInterface::getProjectId, id));
-        for (ApiInterface iface : interfaces) {
-            ruleMapper.delete(new LambdaQueryWrapper<MockRule>().eq(MockRule::getInterfaceId, iface.getId()));
+        // 先停运行时副作用：TCP 监听线程、定时任务
+        for (TcpListener l : tcpListenerService.list(id)) {
+            tcpListenerService.delete(l.getId());
         }
-        interfaceMapper.delete(new LambdaQueryWrapper<ApiInterface>().eq(ApiInterface::getProjectId, id));
-        memberMapper.delete(new LambdaQueryWrapper<ProjectMember>().eq(ProjectMember::getProjectId, id));
+        for (TestSchedule s : scheduleService.list(id)) {
+            scheduleService.delete(s.getId());
+        }
+        // 再清所有子表数据（接口/规则/成员/用例/场景/步骤/环境/变量/日志/记录/密钥/序列/文件模板）
+        cascadeCleaner.deleteProjectData(id);
         projectMapper.deleteById(id);
         ruleCache.reloadAll();
     }

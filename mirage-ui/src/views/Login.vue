@@ -24,12 +24,13 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '../store/auth'
 import logoDark from '../assets/logodark.png'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const form = reactive({ username: '', password: '' })
 const loading = ref(false)
@@ -44,7 +45,8 @@ async function onLogin() {
   loading.value = true
   try {
     await auth.login(form.username, form.password)
-    router.push('/')
+    // 登录后回跳原页（会话过期被踢时保留上下文）
+    router.push(route.query.redirect || '/')
   } catch (e) {
     loginError.value = e?.response?.data?.message || e?.message || '登录失败，请重试'
   } finally {

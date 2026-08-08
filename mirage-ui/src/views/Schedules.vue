@@ -91,7 +91,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
@@ -180,7 +180,10 @@ async function onSave() {
   }
 }
 
-async function onToggle(row) { await api.schedules.toggle(row.id); load() }
+async function onToggle(row) {
+  try { await api.schedules.toggle(row.id) } catch (e) { /* 拦截器已提示 */ }
+  load() // 成功/失败都刷新：失败时把开关视觉态回滚到后端真实值
+}
 async function onRun(row) {
   runLoading[row.id] = true
   try {
@@ -195,10 +198,22 @@ async function onRun(row) {
   }
   load()
 }
-async function onRemove(row) { await ElMessageBox.confirm(`删除定时「${row.name}」？`, '警告', { type: 'warning' }); await api.schedules.remove(row.id); ElMessage.success('已删除'); load() }
+async function onRemove(row) {
+  try {
+    await ElMessageBox.confirm(`删除定时「${row.name}」？`, '警告', { type: 'warning' })
+    await api.schedules.remove(row.id)
+    ElMessage.success('已删除')
+    load()
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return // 用户取消确认
+    /* 拦截器已提示删除失败 */
+  }
+}
 
 watch(() => proj.id, load)
 onMounted(load)
+// 组件卸载时清理 cron 预览定时器，避免对已卸载组件写状态 / 残留请求
+onUnmounted(() => { if (cronTimer) { clearTimeout(cronTimer); cronTimer = null } })
 </script>
 <style scoped>
 .card-header { display: flex; align-items: center; justify-content: space-between; }

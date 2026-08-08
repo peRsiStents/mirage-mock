@@ -6,6 +6,7 @@ import com.miragemock.admin.mapper.ApiInterfaceMapper;
 import com.miragemock.admin.mapper.MockRequestLogMapper;
 import com.miragemock.admin.mapper.MockRuleMapper;
 import com.miragemock.admin.mapper.ProjectMapper;
+import com.miragemock.admin.security.ProjectAuthz;
 import com.miragemock.common.api.PageResult;
 import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.entity.ApiInterface;
@@ -44,14 +45,16 @@ public class LogService {
     private final ApiInterfaceMapper interfaceMapper;
     private final MockRuleMapper ruleMapper;
     private final ProjectMapper projectMapper;
+    private final ProjectAuthz authz;
 
     @Autowired
     public LogService(MockRequestLogMapper logMapper, ApiInterfaceMapper interfaceMapper,
-                      MockRuleMapper ruleMapper, ProjectMapper projectMapper) {
+                      MockRuleMapper ruleMapper, ProjectMapper projectMapper, ProjectAuthz authz) {
         this.logMapper = logMapper;
         this.interfaceMapper = interfaceMapper;
         this.ruleMapper = ruleMapper;
         this.projectMapper = projectMapper;
+        this.authz = authz;
     }
 
     public PageResult<MockRequestLog> query(Long projectId, Long interfaceId, Integer matched, String protocol,
@@ -102,6 +105,7 @@ public class LogService {
         if (lg == null) {
             throw new BizException(ResultCode.NOT_FOUND, "日志不存在");
         }
+        authz.requireMember(lg.getProjectId());
         return lg;
     }
 
