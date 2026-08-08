@@ -2,6 +2,7 @@ package com.miragemock.admin.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jayway.jsonpath.JsonPath;
+import com.miragemock.admin.dto.BatchRunResult;
 import com.miragemock.admin.dto.CaseRunResult;
 import com.miragemock.admin.dto.RunResult;
 import com.miragemock.admin.mapper.TestCaseMapper;
@@ -181,6 +182,70 @@ public class TestCaseService {
         stepMapper.delete(new LambdaQueryWrapper<TestScenarioStep>().in(TestScenarioStep::getCaseId, ids));
         logMapper.delete(new LambdaQueryWrapper<TestRunLog>().in(TestRunLog::getCaseId, ids));
         caseMapper.deleteBatchIds(ids);
+    }
+
+    /**
+     * 批量运行：同项目多用例，项目变量/环境变量只加载一次，逐条执行(proxy)+落历史，返回每条摘要与汇总。
+     * 摘要不含完整响应体（大批量回传过大），需查详情走单条运行/历史。
+     */
+    public BatchRunResult batchRun(List<Long> ids, Long projectId, Long envId) {
+        BatchRunResult res = new BatchRunResult();
+        List<Map<String, Object>> results = new ArrayList<>();
+        res.setResults(results);
+        if (ids == null || ids.isEmpty()) {
+            return res;
+        }
+        Map<String, Object> baseVars;
+        try {
+            baseVars = buildBaseVars(projectId, envId);
+        } catch (Exception e) {
+            baseVars = new HashMap<>();
+        }
+        long t0 = System.currentTimeMillis();
+        int passed = 0;
+        for (Long id : ids) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", id);
+            try {
+                TestCase tc = get(id); // 取全量 + requireMember
+                item.put("name", tc.getName());
+                EvalContext ctx = newContext(projectId, new HashMap<>(baseVars));
+                RunResult rr = executeCase(tc, ctx);
+                writeLog(tc, "proxy", rr);
+                item.put("passed", rr.getPassed());
+                item.put("httpStatus", rr.getHttpStatus());
+                item.put("costMs", rr.getCostMs());
+                item.put("error", rr.getError());
+                if (Boolean.TRUE.equals(rr.getPassed())) {
+                    passed++;
+                }
+            } catch (Exception e) {
+                item.put("passed", false);
+                item.put("error", rootMessage(e));
+            }
+            results.add(item);
+        }
+        res.setTotal(results.size());
+        res.setPassedCount(passed);
+        res.setFailedCount(results.size() - passed);
+        res.setCostMs(System.currentTimeMillis() - t0);
+        res.setPassed(!results.isEmpty() && passed == results.size());
+        return res;
+    }
+
+    /** 批量启用/停用：先逐条鉴权全部通过，再统一改状态（避免半成功）。 */
+    @Transactional
+    public void setBatchStatus(List<Long> ids, Integer status) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        List<TestCase> cases = caseMapper.selectBatchIds(ids);
+        for (TestCase t : cases) {
+            authz.requireMember(t.getProjectId());
+        }
+        TestCase upd = new TestCase();
+        upd.setStatus(status);
+        caseMapper.update(upd, new LambdaQueryWrapper<TestCase>().in(TestCase::getId, ids));
     }
 
     private void normalize(TestCase t) {

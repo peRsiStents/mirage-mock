@@ -13,6 +13,16 @@
             <el-button @click="openVariables">变量/常量</el-button>
             <el-button @click="triggerImport" title="导入 JSON（单条对象或数组）">导入</el-button>
             <el-button @click="exportAll" title="导出当前项目全部用例为 JSON">导出全部</el-button>
+            <el-button type="success" :disabled="!selected.length" :loading="batchRunning" @click="onBatchRun">批量运行<span v-if="selected.length">（{{ selected.length }}）</span></el-button>
+            <el-dropdown trigger="click" :disabled="!selected.length" @command="onBatchStatus">
+              <el-button :disabled="!selected.length">批量状态 ▾</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="enable">启用</el-dropdown-item>
+                  <el-dropdown-item command="disable">停用</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button type="danger" :icon="Delete" :disabled="!selected.length" :loading="batchRemoving" @click="onBatchRemove">批量删除<span v-if="selected.length">（{{ selected.length }}）</span></el-button>
             <el-button type="primary" :icon="Plus" @click="openCreate">新建用例</el-button>
           </div>
@@ -307,6 +317,23 @@
           <el-table-column label="耗时" width="76"><template #default="{ row }">{{ row.costMs }}ms</template></el-table-column>
           <el-table-column prop="error" label="错误" width="120" show-overflow-tooltip />
           <el-table-column label="响应体" show-overflow-tooltip><template #default="{ row }">{{ row.body }}</template></el-table-column>
+        </el-table>
+      </div>
+    </el-dialog>
+
+    <!-- 批量运行结果 -->
+    <el-dialog v-model="batchResultVisible" title="批量运行结果" width="860px" top="3vh">
+      <div v-if="batchResult">
+        <div style="margin-bottom:8px">
+          <el-tag :type="batchResult.passed ? 'success' : 'danger'">{{ batchResult.passed ? '✓ 全部通过' : '✗ 存在失败' }}</el-tag>
+          <span class="muted" style="margin-left:8px">通过 {{ batchResult.passedCount }}/{{ batchResult.total }} · 失败 {{ batchResult.failedCount }} · 总耗时 {{ batchResult.costMs }}ms</span>
+        </div>
+        <el-table :data="batchResult.results" size="small" border max-height="480">
+          <el-table-column prop="name" label="用例" show-overflow-tooltip />
+          <el-table-column label="结果" width="64"><template #default="{ row }">{{ row.passed ? '✓' : '✗' }}</template></el-table-column>
+          <el-table-column prop="httpStatus" label="状态" width="64" />
+          <el-table-column label="耗时" width="80"><template #default="{ row }">{{ row.costMs }}ms</template></el-table-column>
+          <el-table-column prop="error" label="错误" show-overflow-tooltip />
         </el-table>
       </div>
     </el-dialog>
@@ -880,6 +907,9 @@ function addCommonHeader(cmd) {
 
 const selected = ref([])
 const batchRemoving = ref(false)
+const batchRunning = ref(false)
+const batchResultVisible = ref(false)
+const batchResult = ref(null)
 function onSelectionChange(rows) { selected.value = rows }
 async function onBatchRemove() {
   if (!selected.value.length) return
@@ -894,6 +924,40 @@ async function onBatchRemove() {
     /* 拦截器已提示 */
   } finally {
     batchRemoving.value = false
+  }
+}
+
+// 批量运行：统一经后端转发执行（含 TCP），环境变量只加载一次；逐条结果落历史
+async function onBatchRun() {
+  if (!selected.value.length) return
+  batchRunning.value = true
+  try {
+    const res = await api.testCases.runBatch(proj.id, selected.value.map((r) => r.id), runEnv.value)
+    batchResult.value = res.data
+    batchResultVisible.value = true
+    const r = res.data || {}
+    ElMessage[r.passed ? 'success' : 'warning'](`批量运行完成：通过 ${r.passedCount}/${r.total}`)
+    load() // 刷新运行历史计数等
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    batchRunning.value = false
+  }
+}
+
+// 批量启用/停用
+async function onBatchStatus(cmd) {
+  if (!selected.value.length) return
+  const status = cmd === 'enable' ? 1 : 0
+  const label = cmd === 'enable' ? '启用' : '停用'
+  await ElMessageBox.confirm(`确认${label}选中的 ${selected.value.length} 条用例？`, '批量' + label, { type: 'warning' })
+  try {
+    await api.testCases.setBatchStatus(proj.id, selected.value.map((r) => r.id), status)
+    ElMessage.success('已' + label + ' ' + selected.value.length + ' 条')
+    selected.value = []
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
   }
 }
 

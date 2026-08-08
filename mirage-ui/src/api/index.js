@@ -125,6 +125,8 @@ export const api = {
     removeBatch: (ids) => http.delete('/testcases/batch', { data: ids }),
     run: (id, envId) => http.post(`/testcases/${id}/run`, null, { params: { envId }, timeout: 300000 }),
     runData: (id, envId) => http.post(`/testcases/${id}/run-data`, null, { params: { envId }, timeout: 300000 }),
+    runBatch: (pid, ids, envId) => http.post(`/projects/${pid}/testcases/run`, { ids, envId }, { timeout: 600000 }),
+    setBatchStatus: (pid, ids, status) => http.put(`/projects/${pid}/testcases/batch-status`, { ids, status }),
     runs: (id) => http.get(`/testcases/${id}/runs`)
   },
   testVariables: {
@@ -137,6 +139,7 @@ export const api = {
     list: (pid) => http.get(`/projects/${pid}/environments`),
     create: (pid, e) => http.post(`/projects/${pid}/environments`, e),
     update: (id, e) => http.put(`/environments/${id}`, e),
+    clone: (id) => http.post(`/environments/${id}/clone`),
     remove: (id) => http.delete(`/environments/${id}`)
   },
   scenarios: {

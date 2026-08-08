@@ -1,5 +1,7 @@
 package com.miragemock.admin.controller;
 
+import com.miragemock.admin.dto.BatchCaseRequest;
+import com.miragemock.admin.dto.BatchRunResult;
 import com.miragemock.admin.dto.CaseRunResult;
 import com.miragemock.admin.dto.RunResult;
 import com.miragemock.admin.service.TestCaseService;
@@ -78,6 +80,19 @@ public class TestCaseController {
     @PostMapping("/testcases/{id}/run-data")
     public Result<CaseRunResult> runData(@PathVariable Long id, @RequestParam(required = false) Long envId) {
         return Result.ok(service.runData(id, envId));
+    }
+
+    /** 批量运行（选中多条用例一起跑，返回每条摘要 + 汇总） */
+    @PostMapping("/projects/{pid}/testcases/run")
+    public Result<BatchRunResult> batchRun(@PathVariable Long pid, @RequestBody BatchCaseRequest req) {
+        return Result.ok(service.batchRun(req.getIds(), pid, req.getEnvId()));
+    }
+
+    /** 批量启用/停用（status: 1=启用 0=停用） */
+    @PutMapping("/projects/{pid}/testcases/batch-status")
+    public Result<Void> batchStatus(@PathVariable Long pid, @RequestBody BatchCaseRequest req) {
+        service.setBatchStatus(req.getIds(), req.getStatus());
+        return Result.ok();
     }
 
     /** 运行历史（最近 100 条） */

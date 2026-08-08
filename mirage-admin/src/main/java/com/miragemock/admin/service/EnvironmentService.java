@@ -71,4 +71,18 @@ public class EnvironmentService {
         get(id);
         envMapper.deleteById(id);
     }
+
+    /** 克隆环境：复制 baseUrl/变量/状态，名称加(副本)后缀。 */
+    @Transactional
+    public TestEnvironment clone(Long id) {
+        TestEnvironment exists = get(id);
+        TestEnvironment copy = new TestEnvironment();
+        copy.setProjectId(exists.getProjectId());
+        copy.setName((exists.getName() == null ? "环境" : exists.getName()) + "(副本)");
+        copy.setBaseUrl(exists.getBaseUrl());
+        copy.setVariables(exists.getVariables());
+        copy.setStatus(exists.getStatus() == null ? Constants.STATUS_ENABLED : exists.getStatus());
+        envMapper.insert(copy);
+        return copy;
+    }
 }

@@ -19,9 +19,10 @@
         <el-table-column label="变量数" width="80">
           <template #default="{ row }">{{ parseArr(row.variables).length }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="160">
+        <el-table-column label="操作" width="200">
           <template #default="{ row }">
             <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
+            <el-button size="small" link @click="onClone(row)">克隆</el-button>
             <el-button size="small" type="danger" link @click="onRemove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -100,6 +101,16 @@ async function onSave() {
 async function onRemove(row) {
   await ElMessageBox.confirm(`删除环境「${row.name}」？`, '警告', { type: 'warning' })
   await api.environments.remove(row.id); ElMessage.success('已删除'); load()
+}
+
+async function onClone(row) {
+  try {
+    await api.environments.clone(row.id)
+    ElMessage.success('已克隆为「' + row.name + '(副本)」')
+    load()
+  } catch (e) {
+    /* 拦截器已提示 */
+  }
 }
 
 watch(() => proj.id, load)

@@ -43,6 +43,12 @@ public class EnvironmentController {
         return Result.ok(service.update(id, e));
     }
 
+    /** 克隆环境（baseUrl + 变量 + 状态，名称加(副本)） */
+    @PostMapping("/environments/{id}/clone")
+    public Result<TestEnvironment> clone(@PathVariable Long id) {
+        return Result.ok(service.clone(id));
+    }
+
     @DeleteMapping("/environments/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         service.delete(id);
