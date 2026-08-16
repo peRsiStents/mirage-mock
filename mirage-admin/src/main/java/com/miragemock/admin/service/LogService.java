@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.util.AntPathMatcher;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
@@ -337,6 +338,177 @@ public class LogService {
         } catch (UnsupportedEncodingException e) {
             return s;
         }
+    }
+
+    // ============ 日志 → Mock 规则草稿 ============
+
+    /**
+     * 将一条请求日志生成「未保存」的 Mock 规则草稿：
+     * 定位 method+path 对应的接口，响应模板由真实响应启发式转换（手机号/证件/姓名/金额/时间等
+     * 常见字段自动替换为 DSL 生成器，其余保留原值），前端复核后经 POST /interfaces/{iid}/rules 保存。
+     */
+    public MockRule buildRuleDraft(Long projectId, Long logId) {
+        MockRequestLog lg = logMapper.selectById(logId);
+        if (lg == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "日志不存在");
+        }
+        if (lg.getProjectId() == null || !lg.getProjectId().equals(projectId)) {
+            throw new BizException(ResultCode.BAD_REQUEST, "日志不属于当前项目");
+        }
+        authz.requireMember(projectId);
+        if (!"HTTP".equalsIgnoreCase(lg.getProtocol())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "仅支持 HTTP 协议日志生成 Mock 规则");
+        }
+        String[] mp = parseMethodPath(lg.getRequestRaw());
+        ApiInterface iface = matchInterface(projectId, mp[0], mp[1]);
+        if (iface == null) {
+            throw new BizException(ResultCode.NOT_FOUND,
+                    "未找到匹配接口: " + mp[0] + " " + mp[1] + "（请先创建接口，路径支持 {var} 通配）");
+        }
+
+        MockRule rule = new MockRule();
+        rule.setInterfaceId(iface.getId());
+        String base = mp[1].replaceAll("[{}]", "_");
+        rule.setName("auto-" + base.substring(0, Math.min(40, base.length())));
+        rule.setPriority(90); // 优先于默认 100 兜底，模拟"这次真实响应"
+        rule.setMatchCondition("[]");
+        rule.setResponseTemplate(buildTemplateFromResponse(lg.getResponseRaw()));
+        rule.setDelayType("NONE");
+        rule.setFaultType("NONE");
+        rule.setStatus(1);
+        return rule;
+    }
+
+    /** 首行解析：返回 {method, path}。 */
+    private String[] parseMethodPath(String raw) {
+        String method = "GET";
+        String path = "/";
+        if (raw != null) {
+            String line0 = raw.split("\n", -1)[0].trim();
+            int sp = line0.indexOf(' ');
+            if (sp > 0) {
+                method = line0.substring(0, sp).trim().toUpperCase();
+                String target = line0.substring(sp + 1).trim();
+                int q = target.indexOf('?');
+                path = q >= 0 ? target.substring(0, q) : target;
+            }
+        }
+        if (path.isEmpty()) {
+            path = "/";
+        }
+        return new String[]{method, path};
+    }
+
+    /** 在项目 HTTP 接口中按 method+Ant 路径匹配（日志为实际路径，接口可能含 {var}）。 */
+    private ApiInterface matchInterface(Long projectId, String method, String path) {
+        List<ApiInterface> ifaces = interfaceMapper.selectList(new LambdaQueryWrapper<ApiInterface>()
+                .eq(ApiInterface::getProjectId, projectId)
+                .eq(ApiInterface::getProtocol, "HTTP"));
+        AntPathMatcher matcher = new AntPathMatcher();
+        for (ApiInterface i : ifaces) {
+            String m = i.getHttpMethod();
+            boolean methodOk = m == null || m.isEmpty() || "ANY".equalsIgnoreCase(m) || m.equalsIgnoreCase(method);
+            if (methodOk && i.getHttpPath() != null && matcher.match(i.getHttpPath(), path)) {
+                return i;
+            }
+        }
+        return null;
+    }
+
+    /** 响应体 → 模板 JSON（启发式 DSL 化）。非 JSON 响应原样作为文本模板。 */
+    private String buildTemplateFromResponse(String responseRaw) {
+        if (responseRaw == null || responseRaw.trim().isEmpty()) {
+            return "{}";
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = JsonUtils.mapper().readTree(responseRaw);
+            return JsonUtils.toJson(transformValue("", node));
+        } catch (Exception e) {
+            // 非 JSON：作为字符串模板（可手改）
+            return JsonUtils.toJson(responseRaw);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object transformValue(String key, Object val) {
+        if (val instanceof com.fasterxml.jackson.databind.JsonNode) {
+            com.fasterxml.jackson.databind.JsonNode n = (com.fasterxml.jackson.databind.JsonNode) val;
+            if (n.isObject()) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                n.fields().forEachRemaining(e -> m.put(e.getKey(), transformValue(e.getKey(), e.getValue())));
+                return m;
+            }
+            if (n.isArray()) {
+                List<Object> list = new ArrayList<>();
+                n.forEach(item -> list.add(transformValue(key, item)));
+                return list;
+            }
+            if (n.isNull()) {
+                return null;
+            }
+            if (n.isNumber()) {
+                return n.isIntegralNumber() ? n.asLong() : n.asDouble();
+            }
+            if (n.isBoolean()) {
+                return n.asBoolean();
+            }
+            val = n.asText();
+        }
+        if (val instanceof Map) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) val).entrySet()) {
+                m.put(e.getKey(), transformValue(e.getKey(), e.getValue()));
+            }
+            return m;
+        }
+        if (val instanceof List) {
+            List<Object> list = new ArrayList<>();
+            for (Object item : (List<Object>) val) {
+                list.add(transformValue(key, item));
+            }
+            return list;
+        }
+        if (val == null) {
+            return null;
+        }
+        if (val instanceof Number || val instanceof Boolean) {
+            return val;
+        }
+        return toDsl(key, val.toString());
+    }
+
+    /**
+     * 字段名启发式 → DSL 生成器；无法识别时保留原值（可编辑）。
+     * 规则：字段名小写后包含关键 token 即替换，避免误伤（如 phoneNumber → 手机号）。
+     */
+    private String toDsl(String key, String value) {
+        String k = key == null ? "" : key.toLowerCase();
+        if (k.contains("phone") || k.contains("mobile") || k.contains("tel")) {
+            return "${phone.cn_mobile}";
+        }
+        if (k.contains("idcard") || k.contains("id_no") || k.contains("certno") || k.contains("idno")) {
+            return "${idcard.cn}";
+        }
+        if (k.contains("bankcard") || k.contains("cardno") || k.contains("account_no") || k.contains("acctno")) {
+            return "${bankcard.cn}";
+        }
+        if (k.contains("name") || k.contains("realname") || k.contains("custname")) {
+            return "${name.cn}";
+        }
+        if (k.contains("email") || k.contains("mail")) {
+            return "${email}";
+        }
+        if (k.contains("amount") || k.contains("balance") || k.contains("money")
+                || k.contains("price") || k.contains("fee")) {
+            return "${decimal(100,99999,2)}";
+        }
+        if (value != null && value.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}")) {
+            return "${datetime(now-30d, now, yyyy-MM-dd HH:mm:ss)}";
+        }
+        if (value != null && value.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            return "${date(now-30d, now, yyyy-MM-dd)}";
+        }
+        return value == null ? "" : value;
     }
 
     /** 转用例时丢弃的头：hop-by-hop / 自动重算 / 由 body 决定，避免重放时冲突。 */

@@ -48,6 +48,12 @@ mirage:
       - fd00:ec2::254
       - metadata.google.internal
       - metadata
+  alert:
+    # 定时回归失败告警（默认关闭；type: dingtalk/wecom/generic）
+    enabled: ${MIRAGE_ALERT_ENABLED:false}
+    webhook-url: ${MIRAGE_ALERT_WEBHOOK:}
+    type: ${MIRAGE_ALERT_TYPE:generic}
+    keyword: ${MIRAGE_ALERT_KEYWORD:}
 
 logging:
   level:

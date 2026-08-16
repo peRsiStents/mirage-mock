@@ -130,6 +130,8 @@ public class ScenarioService {
                 st.setSeq(seq++);
                 if (st.getEnabled() == null) st.setEnabled(1);
                 if (st.getContinueOnFail() == null) st.setContinueOnFail(0);
+                if (st.getRetryCount() == null) st.setRetryCount(0);
+                if (st.getRetryDelayMs() == null) st.setRetryDelayMs(1000);
                 stepMapper.insert(st);
             }
         }
@@ -176,6 +178,8 @@ public class ScenarioService {
         boolean scenarioPassed = true;
         int total = 0, passed = 0, failed = 0;
         boolean stopped = false;
+        Boolean lastStepPassed = null;
+        Integer lastStepStatus = null;
         long t0 = System.currentTimeMillis();
 
         for (TestScenarioStep step : steps) {
@@ -188,6 +192,14 @@ public class ScenarioService {
 
             if (stopped) {
                 d.put("skipped", true);
+                d.put("passed", false);
+                detail.add(d);
+                continue;
+            }
+            // 步骤执行条件（引用上一步结果）：不满足则跳过（不计入 total/failed）
+            if (!ScenarioStepPolicy.shouldRun(step.getCondition(), lastStepPassed, lastStepStatus)) {
+                d.put("skipped", true);
+                d.put("conditionSkipped", true);
                 d.put("passed", false);
                 detail.add(d);
                 continue;
@@ -240,8 +252,26 @@ public class ScenarioService {
                 d.put("extracts", stepExtracts);
                 d.put("skipped", false);
             } else {
-                // 普通单次执行
-                RunResult rr = runOnce(tc, projectId, baseVars, runtimeExtra);
+                // 普通单次执行（支持失败自动重试：retryCount 次，间隔 retryDelayMs）
+                int retries = ScenarioStepPolicy.retries(step.getRetryCount());
+                long retryDelay = ScenarioStepPolicy.retryDelayMs(step.getRetryDelayMs());
+                RunResult rr = null;
+                int attempts = 0;
+                for (int a = 0; a <= retries; a++) {
+                    attempts++;
+                    rr = runOnce(tc, projectId, baseVars, runtimeExtra);
+                    if (Boolean.TRUE.equals(rr.getPassed()) || a == retries) {
+                        break;
+                    }
+                    if (retryDelay > 0) {
+                        try {
+                            Thread.sleep(retryDelay);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
                 Map<String, Object> extracts = testCaseService.extract(rr, parseList(step.getExtract()));
                 runtimeExtra.putAll(extracts);
                 stepPassed = Boolean.TRUE.equals(rr.getPassed());
@@ -253,6 +283,7 @@ public class ScenarioService {
                 d.put("body", truncate(rr.getBody()));
                 d.put("assertions", rr.getAssertions());
                 d.put("extracts", extracts);
+                d.put("attempts", attempts);
                 d.put("skipped", false);
             }
 
@@ -265,6 +296,10 @@ public class ScenarioService {
                     stopped = true;
                 }
             }
+            // 记录上一步结果，供后续步骤条件（passed/failed/status==）引用
+            lastStepPassed = stepPassed;
+            Object st = d.get("httpStatus");
+            lastStepStatus = st instanceof Number ? ((Number) st).intValue() : null;
             detail.add(d);
         }
         long cost = System.currentTimeMillis() - t0;

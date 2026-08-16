@@ -99,11 +99,15 @@ public class MockHttpFilter implements Filter {
                     interfaceId = hint.getInterfaceId();
                     ruleId = null;
                     matched = true; // 由代理服务（录制/回放）给出响应
+                    setMirageTraceHeaders(resp, projectId, interfaceId, null, true, "proxy",
+                            (int) (System.currentTimeMillis() - t0));
                     responseRaw = writeProxyResponse(resp, proxy);
                 } else {
                     projectId = result.getProjectId();
                     interfaceId = result.getInterfaceId();
                     matched = false;
+                    setMirageTraceHeaders(resp, projectId, interfaceId, null, false, null,
+                            (int) (System.currentTimeMillis() - t0));
                     responseRaw = writeResponse(resp, result.getResponse());
                 }
             } else {
@@ -111,6 +115,8 @@ public class MockHttpFilter implements Filter {
                 interfaceId = result.getInterfaceId();
                 ruleId = result.getRuleId();
                 matched = true;
+                setMirageTraceHeaders(resp, projectId, interfaceId, ruleId, true, null,
+                        (int) (System.currentTimeMillis() - t0));
                 responseRaw = writeResponse(resp, result.getResponse());
             }
         } catch (BodyTooLargeException e) {
@@ -186,6 +192,29 @@ public class MockHttpFilter implements Filter {
     }
 
     // ============ 响应写入 ============
+
+    /**
+     * 附加 Mock 命中追踪头，便于联调时确认请求走了哪个项目/接口/规则：
+     * X-Mirage-Project / X-Mirage-Interface / X-Mirage-Rule / X-Mirage-Matched / X-Mirage-Mode / X-Mirage-Cost-Ms
+     */
+    private void setMirageTraceHeaders(HttpServletResponse resp, Long projectId, Long interfaceId,
+                                       Long ruleId, boolean matched, String mode, int costMs) {
+        String code = engine.projectCodeOf(projectId);
+        if (code != null) {
+            resp.setHeader("X-Mirage-Project", code);
+        }
+        if (interfaceId != null) {
+            resp.setHeader("X-Mirage-Interface", String.valueOf(interfaceId));
+        }
+        if (ruleId != null) {
+            resp.setHeader("X-Mirage-Rule", String.valueOf(ruleId));
+        }
+        resp.setHeader("X-Mirage-Matched", matched ? "1" : "0");
+        if (mode != null) {
+            resp.setHeader("X-Mirage-Mode", mode);
+        }
+        resp.setHeader("X-Mirage-Cost-Ms", String.valueOf(costMs));
+    }
 
     private String writeResponse(HttpServletResponse resp, MockResponse mr) throws IOException {
         if (mr.getAction() == MockResponse.Action.TIMEOUT) {

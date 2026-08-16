@@ -571,7 +571,23 @@ public class TestCaseService {
                 case "header": {
                     String hv = headers == null ? null : headers.get(target == null ? "" : target.toLowerCase());
                     actual = hv == null ? "" : hv;
-                    passed = "contains".equals(op) ? actual.contains(expected) : actual.equals(expected);
+                    switch (op) {
+                        case "contains":
+                            passed = actual.contains(expected);
+                            break;
+                        case "notContains":
+                            passed = !actual.contains(expected);
+                            break;
+                        case "regex":
+                            passed = regexMatches(expected, actual);
+                            break;
+                        case "ne":
+                            passed = !actual.equals(expected);
+                            break;
+                        default:
+                            passed = actual.equals(expected);
+                            break;
+                    }
                     break;
                 }
                 case "jsonPath": {
@@ -583,9 +599,28 @@ public class TestCaseService {
                             actual = val == null ? "(无)" : display;
                             passed = val != null;
                             break;
+                        case "notExists":
+                            actual = val == null ? "(无)" : display;
+                            passed = val == null;
+                            break;
+                        case "notEmpty":
+                            passed = val != null && !display.isEmpty();
+                            break;
                         case "contains":
                             passed = display.contains(expected);
                             break;
+                        case "notContains":
+                            passed = !display.contains(expected);
+                            break;
+                        case "regex":
+                            passed = regexMatches(expected, display);
+                            break;
+                        case "arrayLength": {
+                            int size = arraySize(val);
+                            actual = size < 0 ? "非数组" : size + " 个元素";
+                            passed = size >= 0 && size == parseLong(expected, -1);
+                            break;
+                        }
                         case "ne":
                             passed = !jsonSmartEquals(val, display, expected);
                             break;
@@ -694,6 +729,29 @@ public class TestCaseService {
             case "le": return a <= b;
             default: return false;
         }
+    }
+
+    /** 正则全匹配；非法正则视为不匹配（不抛异常中断整个断言）。 */
+    private boolean regexMatches(String regex, String actual) {
+        if (regex == null || actual == null) {
+            return false;
+        }
+        try {
+            return java.util.regex.Pattern.matches(regex, actual);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 数组/集合长度；非集合返回 -1。 */
+    private int arraySize(Object val) {
+        if (val instanceof java.util.Collection) {
+            return ((java.util.Collection<?>) val).size();
+        }
+        if (val != null && val.getClass().isArray()) {
+            return java.lang.reflect.Array.getLength(val);
+        }
+        return -1;
     }
 
     private Double toDouble(Object o) {

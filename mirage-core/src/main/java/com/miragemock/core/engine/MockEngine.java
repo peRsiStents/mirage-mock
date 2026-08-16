@@ -528,4 +528,10 @@ public class MockEngine {
         ProjectSnapshot snap = cache.getProject(projectId);
         return snap == null ? java.util.Collections.emptyList() : snap.httpInterfaces();
     }
+
+    /** 项目编码（供响应追踪头展示；未知项目返回 null） */
+    public String projectCodeOf(Long projectId) {
+        ProjectSnapshot snap = cache.getProject(projectId);
+        return snap == null ? null : snap.getProjectCode();
+    }
 }

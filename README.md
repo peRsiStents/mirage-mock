@@ -92,6 +92,12 @@ mirage-ui            管理端前端（Vue3 + Element Plus + Vite，构建产物
 - **文件模板**（`/file-templates`）：模板生成 + 预览（对接工具类能力）
 - **工具**（`/tools`）：JSON/XML 格式化、校验、转义等小工具
 - **录制回放（代理模式）**：接口可配置 `recordMode`（0 关闭 / 1 录制 / 2 回放）与 `upstreamUrl`。规则未命中时：录制模式转发上游并存响应快照，回放模式优先返回快照（命中计数），后续相同请求（method+path+query+body 签名）不再访问上游。配置方式：`PUT /interfaces/{id}` 携带 `{"recordMode":1,"upstreamUrl":"http://real-service:8080"}`
+- **OpenAPI/Swagger 一键导入**：`POST /api/v1/import/openapi` 上传 OpenAPI 3 文档，自动批量创建 HTTP 接口 + 兜底规则（响应模板优先取 200 的 example，无则按 schema 生成字段骨架），已存在的 method+path 自动跳过
+- **请求日志 → Mock 规则**：`POST /logs/{logId}/rule` 将一条请求日志生成为未保存的规则草稿——自动定位接口，响应模板按字段名启发式转换（`phone→${phone.cn_mobile}`、`name→${name.cn}`、`amount→${decimal(100,99999,2)}`、日期→`${datetime(...)}` 等），复核后保存
+- **Mock 命中追踪头**：所有 Mock 响应附加 `X-Mirage-Project`（项目编码）/ `X-Mirage-Interface` / `X-Mirage-Rule`（命中规则）/ `X-Mirage-Matched` / `X-Mirage-Cost-Ms`，联调时一眼确认走了哪条规则；录制回放响应附加 `X-Mirage-Mode: proxy`
+- **断言增强**：jsonPath 断言新增 `regex`（正则全匹配）/ `arrayLength`（数组长度）/ `notEmpty` / `notContains` / `notExists` 操作符；header 断言支持 `regex` / `notContains`
+- **调度失败告警**：定时回归未通过或异常时推送钉钉/企业微信/通用 webhook（`mirage.alert` 配置，默认关闭）
+- **场景条件分支与重试**：步骤可配置执行条件（`passed` / `failed` / `status==200` / `status!=200`，引用上一步结果，不满足自动跳过）与失败自动重试（`retryCount` + `retryDelayMs`）
 
 ### 安全设计
 - JWT 鉴权（`Authorization: Bearer`），登录接口限流（每分钟上限 + 连续失败锁定）
