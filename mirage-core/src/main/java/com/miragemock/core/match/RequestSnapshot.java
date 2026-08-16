@@ -24,6 +24,9 @@ public class RequestSnapshot {
     /** query 参数（单值，取首个） */
     private Map<String, String> query;
 
+    /** 原始 query 字符串（录制回放转发/签名用；未解析原始串时为 null） */
+    private String queryRaw;
+
     /** 表单参数 */
     private Map<String, String> form;
 

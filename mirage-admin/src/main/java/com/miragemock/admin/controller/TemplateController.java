@@ -48,7 +48,8 @@ public class TemplateController {
         if (request.getContext() != null) {
             flatten("", request.getContext(), baseVars);
         }
-        return Result.ok(engine.renderForEval(node, baseVars, request.getProjectId()));
+        // 严格模式：表达式主体位置的未知变量（拼写错误/上下文缺失）直接报错，而非静默降级为字面量
+        return Result.ok(engine.renderForEval(node, baseVars, request.getProjectId(), true));
     }
 
     @SuppressWarnings("unchecked")

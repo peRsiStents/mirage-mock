@@ -17,7 +17,11 @@ public class JsonMessageParser implements MessageParser {
 
     @Override
     public Map<String, Object> parse(byte[] frame, Map<String, Object> formatConfig) {
-        String text = new String(frame, StandardCharsets.UTF_8);
+        String text = frame == null ? "" : new String(frame, StandardCharsets.UTF_8);
+        if (text.trim().isEmpty()) {
+            // 空帧：返回空字段树，避免下游（路由提取/匹配/日志）出现 null 传播
+            return new java.util.LinkedHashMap<>();
+        }
         try {
             return JsonUtils.parseMap(text);
         } catch (Exception e) {

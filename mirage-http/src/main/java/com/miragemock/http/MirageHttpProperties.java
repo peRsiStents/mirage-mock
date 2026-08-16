@@ -19,4 +19,7 @@ public class MirageHttpProperties {
 
     /** TIMEOUT 故障注入的挂起毫秒数（保护容器线程） */
     private long timeoutHangMs = 60_000L;
+
+    /** Mock 请求体最大字节数（防超大 body 打爆内存），默认 1MB */
+    private int maxBodyBytes = 1_048_576;
 }

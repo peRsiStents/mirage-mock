@@ -3,12 +3,16 @@ package com.miragemock.dsl.eval;
 import com.miragemock.common.util.JsonUtils;
 import com.miragemock.dsl.func.FunctionRegistry;
 import com.miragemock.dsl.spi.MockFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 表达式 / 模板求值器。
@@ -20,6 +24,11 @@ import java.util.Map;
  * </ul>
  */
 public class ExpressionEvaluator {
+
+    private static final Logger log = LoggerFactory.getLogger(ExpressionEvaluator.class);
+
+    /** 已告警过的未知变量名（进程级去重，避免日志刷屏） */
+    private static final Set<String> WARNED_UNKNOWN_VARS = ConcurrentHashMap.newKeySet();
 
     private final FunctionRegistry registry;
 
@@ -91,7 +100,16 @@ public class ExpressionEvaluator {
             if (ctx.hasVariable(name)) {
                 return ctx.getVariable(name);
             }
-            // 未知裸标识符按其名字字符串处理（支持 alpha_num/nodash/charset 等枚举 token）
+            // 未知裸标识符：函数参数位（如 string(alpha_num,32) 的字符集 token、uuid(nodash)）
+            // 按字面量字符串处理；表达式主体位置的未知变量在严格模式下直接报错，帮助发现拼写错误。
+            if (ctx.isStrict() && !ctx.isInArgs()) {
+                ctx.recordUnknownVar(name);
+                throw new ExprException("未知变量: " + name + "（检查拼写，或确认该上下文变量在当前模板中可用）");
+            }
+            if (!ctx.isInArgs()) {
+                ctx.recordUnknownVar(name);
+                warnUnknownVar(name);
+            }
             return name;
         }
         if (node instanceof Ast.Nested) {
@@ -116,13 +134,24 @@ public class ExpressionEvaluator {
         List<Object> args = new ArrayList<>(fc.argSpecs.size());
         for (Object spec : fc.argSpecs) {
             if (spec instanceof Ast.Node) {
-                args.add(evalNode((Ast.Node) spec, ctx));
+                ctx.pushInArgs();
+                try {
+                    args.add(evalNode((Ast.Node) spec, ctx));
+                } finally {
+                    ctx.popInArgs();
+                }
             } else {
                 // 原始字符串参数（date/datetime）
                 args.add(spec);
             }
         }
         return fn.eval(args, ctx);
+    }
+
+    private static void warnUnknownVar(String name) {
+        if (WARNED_UNKNOWN_VARS.add(name)) {
+            log.warn("表达式引用了未知变量 '{}'，已按字面量字符串处理（可能是拼写错误），进程内仅告警一次", name);
+        }
     }
 
     // ============ 运算与类型 ============

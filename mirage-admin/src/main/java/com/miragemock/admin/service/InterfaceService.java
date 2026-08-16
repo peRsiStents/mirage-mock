@@ -83,6 +83,12 @@ public class InterfaceService {
         if (patch.getStatus() != null) {
             exists.setStatus(patch.getStatus());
         }
+        if (patch.getRecordMode() != null) {
+            exists.setRecordMode(patch.getRecordMode());
+        }
+        if (patch.getUpstreamUrl() != null) {
+            exists.setUpstreamUrl(patch.getUpstreamUrl());
+        }
         if (patch.getRemark() != null) {
             exists.setRemark(patch.getRemark());
         }

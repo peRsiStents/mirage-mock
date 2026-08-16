@@ -24,6 +24,10 @@
             <artifactId>mirage-tcp</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.miragemock</groupId>
+            <artifactId>mirage-http</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-boot-starter</artifactId>
         </dependency>

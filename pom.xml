@@ -40,6 +40,7 @@
         <jsonpath.version>2.8.0</jsonpath.version>
         <jjwt.version>0.11.5</jjwt.version>
         <netty.version>4.1.108.Final</netty.version>
+        <jacoco.version>0.8.11</jacoco.version>
     </properties>
 
     <dependencyManagement>
@@ -140,7 +141,35 @@
                         <encoding>UTF-8</encoding>
                     </configuration>
                 </plugin>
+                <!-- JaCoCo 覆盖率：mvn test 后各模块 target/site/jacoco/index.html
+                     注意：故意不加 check 硬门槛（-DskipTests 时无执行数据会误报失败），
+                     待核心模块覆盖率达标后可在此开启 check goal。 -->
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco.version}</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>prepare-agent</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>report</id>
+                            <phase>test</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
     </build>
 </project>

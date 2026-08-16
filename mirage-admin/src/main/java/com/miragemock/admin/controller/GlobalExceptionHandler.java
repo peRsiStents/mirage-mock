@@ -38,6 +38,11 @@ public class GlobalExceptionHandler {
         return Result.fail(ResultCode.BAD_REQUEST, e.getMessage());
     }
 
+    @ExceptionHandler(com.miragemock.dsl.eval.ExprException.class)
+    public Result<Void> expr(com.miragemock.dsl.eval.ExprException e) {
+        return Result.fail(ResultCode.EXPRESSION_ERROR, e.getMessage());
+    }
+
     @ExceptionHandler(Throwable.class)
     public ResponseEntity<Result<Void>> other(Throwable e) {
         log.error("未处理异常", e);

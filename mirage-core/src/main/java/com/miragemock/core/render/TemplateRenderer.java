@@ -58,7 +58,8 @@ public class TemplateRenderer {
             return RenderedResponse.of(200, null, null);
         }
         Map<String, Object> vars = baseVars == null ? new HashMap<>() : new HashMap<>(baseVars);
-        EvalContext workCtx = new EvalContext(vars, baseCtx.getSecretResolver(), baseCtx.getSeqProvider(), baseCtx.getProjectId());
+        EvalContext workCtx = new EvalContext(vars, baseCtx.getSecretResolver(), baseCtx.getSeqProvider(), baseCtx.getProjectId())
+                .setStrict(baseCtx.isStrict());
 
         int status = 200;
         Map<String, String> headers = null;
@@ -99,7 +100,8 @@ public class TemplateRenderer {
             return null;
         }
         Map<String, Object> vars = new HashMap<>(seedVars);
-        EvalContext workCtx = new EvalContext(vars, baseCtx.getSecretResolver(), baseCtx.getSeqProvider(), baseCtx.getProjectId());
+        EvalContext workCtx = new EvalContext(vars, baseCtx.getSecretResolver(), baseCtx.getSeqProvider(), baseCtx.getProjectId())
+                .setStrict(baseCtx.isStrict());
 
         List<Leaf> leaves = new ArrayList<>();
         collectLeaves(bodyTree, "", leaves);
