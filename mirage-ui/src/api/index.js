@@ -2,7 +2,8 @@ import http from './client'
 
 export const api = {
   auth: {
-    login: (username, password) => http.post('/auth/login', { username, password })
+    // silent：登录失败只走 Login.vue 的内联 alert，避免拦截器再弹一个 toast（双提示）
+    login: (username, password) => http.post('/auth/login', { username, password }, { silent: true })
   },
   projects: {
     list: () => http.get('/projects'),
@@ -12,16 +13,20 @@ export const api = {
     remove: (id) => http.delete(`/projects/${id}`),
     members: (id) => http.get(`/projects/${id}/members`),
     addMember: (id, m) => http.post(`/projects/${id}/members`, m),
-    removeMember: (id, uid) => http.delete(`/projects/${id}/members/${uid}`)
+    removeMember: (id, uid) => http.delete(`/projects/${id}/members/${uid}`),
+    // CI Token 已从项目 JSON 移除（@JsonIgnore），改为按需获取 / 重置（仅管理员）
+    ciToken: (id) => http.get(`/projects/${id}/ci-token`),
+    rotateCiToken: (id) => http.post(`/projects/${id}/ci-token/rotate`)
   },
   interfaces: {
-    list: (pid) => http.get(`/projects/${pid}/interfaces`),
+    // 接口/规则列表可能较大（单项目几百条），给更宽的超时避免默认 20s 被打断
+    list: (pid) => http.get(`/projects/${pid}/interfaces`, { timeout: 60000 }),
     create: (pid, itf) => http.post(`/projects/${pid}/interfaces`, itf),
     update: (id, itf) => http.put(`/interfaces/${id}`, itf),
     remove: (id) => http.delete(`/interfaces/${id}`)
   },
   rules: {
-    list: (iid) => http.get(`/interfaces/${iid}/rules`),
+    list: (iid) => http.get(`/interfaces/${iid}/rules`, { timeout: 60000 }),
     create: (iid, r) => http.post(`/interfaces/${iid}/rules`, r),
     update: (id, r) => http.put(`/rules/${id}`, r),
     remove: (id) => http.delete(`/rules/${id}`),
@@ -75,6 +80,16 @@ export const api = {
     urlEncode: (p) => http.post('/tools/url/encode', p),
     urlDecode: (p) => http.post('/tools/url/decode', p),
     hash: (p) => http.post('/tools/hash', p),
+    // 摘要（MD5/SHA 系列）：文本或文件（contentB64）。silent：失败时由组件内联提示，避免双 toast
+    digest: (p) => http.post('/tools/digest', p, { silent: true }),
+    // JSONPath 求值（silent 同上）
+    jsonPath: (p) => http.post('/tools/jsonpath', p, { silent: true }),
+    // HMAC 签名（接口签名调试）。silent：失败由组件内联提示
+    hmac: (p) => http.post('/tools/hmac', p, { silent: true }),
+    // 文本 → 目标字符集字节（排查中文乱码）
+    charsetEncode: (p) => http.post('/tools/charset/encode', p, { silent: true }),
+    // 字节（Hex/Base64）→ 文本
+    charsetDecode: (p) => http.post('/tools/charset/decode', p, { silent: true }),
     jwtDecode: (p) => http.post('/tools/jwt/decode', p),
     tsNow: () => http.post('/tools/timestamp/now'),
     tsToEpoch: (p) => http.post('/tools/timestamp/to-epoch', p),
@@ -127,7 +142,9 @@ export const api = {
     runData: (id, envId) => http.post(`/testcases/${id}/run-data`, null, { params: { envId }, timeout: 300000 }),
     runBatch: (pid, ids, envId) => http.post(`/projects/${pid}/testcases/run`, { ids, envId }, { timeout: 600000 }),
     setBatchStatus: (pid, ids, status) => http.put(`/projects/${pid}/testcases/batch-status`, { ids, status }),
-    runs: (id) => http.get(`/testcases/${id}/runs`)
+    runs: (id) => http.get(`/testcases/${id}/runs`),
+    // 单条运行记录详情（含请求/返回报文）
+    runDetail: (id, runId) => http.get(`/testcases/${id}/runs/${runId}`)
   },
   testVariables: {
     list: (pid) => http.get(`/projects/${pid}/test-variables`),

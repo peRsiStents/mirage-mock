@@ -82,13 +82,17 @@
     <el-dialog v-model="ciVisible" title="CI / 流水线接入" width="680px">
       <div v-if="ciProject">
         <div class="kv-title">CI Token（免 JWT 触发场景运行）</div>
-        <el-input :model-value="ciProject.ciToken || '(未生成)'" readonly>
+        <el-input :model-value="ciToken || '(加载中…)'" readonly :loading="ciLoading">
           <template #append>
-            <el-button :icon="CopyDocument" @click="copyText(ciProject.ciToken || '')">复制</el-button>
+            <el-button :icon="CopyDocument" @click="copyText(ciToken)">复制</el-button>
           </template>
         </el-input>
+        <div style="margin-top:8px; display:flex; gap:8px">
+          <el-button size="small" :loading="ciLoading" @click="loadCiToken(ciProject.id)">重新加载</el-button>
+          <el-button size="small" type="warning" :loading="ciLoading" @click="rotateCiToken">重置 Token</el-button>
+        </div>
         <el-alert type="warning" :closable="false" style="margin-top:8px"
-          title="Token 即该项目的运行密钥，请像密码一样保管；泄露后请在项目设置中重新生成。" />
+          title="Token 即该项目的运行密钥，请像密码一样保管；泄露后请点击「重置 Token」重新生成。" />
 
         <div class="kv-title" style="margin-top:14px">调用示例（推荐用请求头传 token，避免进访问日志 / referer）</div>
         <pre class="ci-curl">{{ curlExample }}</pre>
@@ -107,11 +111,12 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus, CopyDocument } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useProjectStore } from '../store/project'
 import { copyText } from '../utils/clipboard'
+import { confirmAction } from '../utils/confirm'
 
 const proj = useProjectStore()
 const list = ref([])
@@ -131,9 +136,12 @@ const users = ref([])
 // CI 接入
 const ciVisible = ref(false)
 const ciProject = ref(null)
+// ciToken 已从项目 JSON 移除（@JsonIgnore），必须按需单独拉取
+const ciToken = ref('')
+const ciLoading = ref(false)
 const curlExample = computed(() => {
   const origin = window.location.origin
-  const token = ciProject.value?.ciToken || '<token>'
+  const token = ciToken.value || '<token>'
   return [
     `curl -fsS -X POST "${origin}/api/v1/ci/scenarios/{场景ID}/run?env={环境ID,可选}" \\`,
     `  -H "X-CI-Token: ${token}" \\`,
@@ -142,7 +150,40 @@ const curlExample = computed(() => {
 })
 function openCi(row) {
   ciProject.value = row
+  ciToken.value = ''
   ciVisible.value = true
+  loadCiToken(row.id)
+}
+
+/** 拉取 CI Token（仅管理员可读；后端已做鉴权） */
+async function loadCiToken(pid) {
+  if (!pid) return
+  ciLoading.value = true
+  try {
+    const res = await api.projects.ciToken(pid)
+    ciToken.value = res.data?.ciToken || ''
+  } catch (e) {
+    ciToken.value = ''
+    /* 拦截器已提示（非管理员会 FORBIDDEN） */
+  } finally {
+    ciLoading.value = false
+  }
+}
+
+/** 重置 CI Token：旧 token 立即失效 */
+async function rotateCiToken() {
+  if (!ciProject.value) return
+  if (!(await confirmAction('重置后旧 Token 立即失效，正在使用它的 CI 流水线会全部失败。确认重置？', { title: '重置 CI Token' }))) return
+  ciLoading.value = true
+  try {
+    const res = await api.projects.rotateCiToken(ciProject.value.id)
+    ciToken.value = res.data?.ciToken || ''
+    ElMessage.success('Token 已重置，请同步更新 CI 流水线配置')
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    ciLoading.value = false
+  }
 }
 
 async function load() {
@@ -161,7 +202,8 @@ function openCreate() {
 }
 
 function openEdit(row) {
-  Object.assign(form, row)
+  // 显式赋值，避免整行 Object.assign 把 createTime/ruleVersion 等服务端字段灌进表单
+  Object.assign(form, { id: row.id, name: row.name, code: row.code, status: row.status == null ? 1 : row.status, remark: row.remark || '' })
   formVisible.value = true
 }
 
@@ -186,10 +228,20 @@ async function onSave() {
 }
 
 async function onRemove(row) {
-  await ElMessageBox.confirm(`确认删除项目「${row.name}」？将级联删除其接口与规则`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`确认删除项目「${row.name}」？将级联删除其接口与规则`, { title: '警告' }))) return
   await api.projects.remove(row.id)
   ElMessage.success('已删除')
-  load()
+  // 删掉的正是当前项目时，清空项目选择并切到其它项目，
+  // 否则顶栏仍指向已删除项目，首页/接口页全部请求 404
+  if (String(proj.id) === String(row.id)) {
+    const rest = list.value.filter((p) => String(p.id) !== String(row.id))
+    if (rest.length) {
+      proj.select(rest[0])
+    } else {
+      proj.clear()
+    }
+  }
+  await load()
 }
 
 function useProject(row) {

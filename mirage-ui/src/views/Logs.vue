@@ -57,7 +57,7 @@
         :total="page.total"
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next"
-        @current-change="load" @size-change="load"
+        @current-change="load" @size-change="onSizeChange"
       />
     </el-card>
 
@@ -76,6 +76,7 @@ import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { createGuard } from '../api/client'
 import { useProjectStore } from '../store/project'
 import { useTestCaseDraftStore } from '../store/testcaseDraft'
 
@@ -89,6 +90,9 @@ const page = reactive({ current: 1, size: 20, total: 0 })
 
 const detailVisible = ref(false)
 const detail = ref({})
+
+// 竞态防护：切项目/快速翻页时旧响应不回写
+const fetchLogs = createGuard((params) => api.logs.query(proj.id, params))
 
 const interfaces = ref([])
 async function loadInterfaces() {
@@ -119,12 +123,20 @@ async function load() {
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.from) params.from = Number(filters.from)
     if (filters.to) params.to = Number(filters.to)
-    const res = await api.logs.query(proj.id, params)
-    logs.value = res.data.list || []
-    page.total = res.data.total || 0
+    const res = await fetchLogs(params)
+    if (res) {
+      logs.value = res.data.list || []
+      page.total = res.data.total || 0
+    }
   } finally {
     loading.value = false
   }
+}
+
+// 改每页条数时回到第一页，避免落在超出范围的大页码上拿空数据
+function onSizeChange() {
+  page.current = 1
+  load()
 }
 
 function resetFilters() {

@@ -133,9 +133,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus, Delete, Top, Bottom } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { createGuard } from '../api/client'
+import { confirmAction } from '../utils/confirm'
 import { useProjectStore } from '../store/project'
 import { copyText } from '../utils/clipboard'
 import ResponseBody from '../components/ResponseBody.vue'
@@ -167,11 +169,18 @@ const runLoading = reactive({})
 
 function envName(id) { const e = envs.value.find((x) => x.id === id); return e ? e.name : '—' }
 
+// 切换项目时旧的取数请求可能后到，用序号保证「只有最新一次」才回写，避免串项目的陈旧数据
+const fetchScenarios = createGuard((pid) => Promise.all([
+  api.scenarios.list(pid), api.environments.list(pid), api.testCases.list(pid)
+]))
+
 async function load() {
   if (!proj.id) return
   loading.value = true
   try {
-    const [s, e, c] = await Promise.all([api.scenarios.list(proj.id), api.environments.list(proj.id), api.testCases.list(proj.id)])
+    const res = await fetchScenarios(proj.id)
+    if (!res) return
+    const [s, e, c] = res
     list.value = s.data || []
     envs.value = e.data || []
     cases.value = c.data || []
@@ -252,7 +261,7 @@ async function onRun(row) {
 }
 
 async function onRemove(row) {
-  await ElMessageBox.confirm(`删除场景「${row.name}」及其步骤？`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`删除场景「${row.name}」及其步骤？`, { title: '警告' }))) return
   await api.scenarios.remove(row.id); ElMessage.success('已删除'); load()
 }
 

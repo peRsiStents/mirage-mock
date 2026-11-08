@@ -92,9 +92,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { createGuard } from '../api/client'
+import { confirmAction } from '../utils/confirm'
 import { useProjectStore } from '../store/project'
 import ResponseBody from '../components/ResponseBody.vue'
 
@@ -138,11 +140,18 @@ function short(v) { const s = String(v); return s.length > 80 ? s.slice(0, 80) +
 
 function scenarioName(id) { const s = scenarios.value.find(x => x.id === id); return s ? s.name : '—' }
 
+// 切换项目时旧的取数请求可能后到，只让最新一次的响应回写，避免串项目的陈旧数据
+const fetchSchedules = createGuard((pid) => Promise.all([
+  api.schedules.list(pid), api.scenarios.list(pid), api.environments.list(pid)
+]))
+
 async function load() {
   if (!proj.id) return
   loading.value = true
   try {
-    const [s, sc, e] = await Promise.all([api.schedules.list(proj.id), api.scenarios.list(proj.id), api.environments.list(proj.id)])
+    const res = await fetchSchedules(proj.id)
+    if (!res) return
+    const [s, sc, e] = res
     list.value = s.data || []; scenarios.value = sc.data || []; envs.value = e.data || []
     refreshNextRuns()
   } finally { loading.value = false }
@@ -199,13 +208,12 @@ async function onRun(row) {
   load()
 }
 async function onRemove(row) {
+  if (!(await confirmAction(`删除定时「${row.name}」？`, { title: '警告' }))) return
   try {
-    await ElMessageBox.confirm(`删除定时「${row.name}」？`, '警告', { type: 'warning' })
     await api.schedules.remove(row.id)
     ElMessage.success('已删除')
     load()
   } catch (e) {
-    if (e === 'cancel' || e === 'close') return // 用户取消确认
     /* 拦截器已提示删除失败 */
   }
 }

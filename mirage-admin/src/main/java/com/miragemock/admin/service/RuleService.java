@@ -11,15 +11,20 @@ import com.miragemock.common.exception.BizException;
 import com.miragemock.common.util.JsonUtils;
 import com.miragemock.core.cache.RuleCache;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 @Service
 public class RuleService {
+
+    private static final Logger log = LoggerFactory.getLogger(RuleService.class);
 
     private final MockRuleMapper ruleMapper;
     private final InterfaceService interfaceService;
@@ -88,13 +93,23 @@ public class RuleService {
         // 先逐条鉴权（interfaceService.get 抛 FORBIDDEN 即整体事务回滚），全部通过后再删，
         // 避免「先 deleteBatchIds 后鉴权」导致他人规则已被删除却只抛异常。
         Set<Long> projectIds = new HashSet<>();
+        List<Long> deletable = new ArrayList<>();
         for (MockRule r : rules) {
-            ApiInterface iface = interfaceService.get(r.getInterfaceId());
-            if (iface != null) {
-                projectIds.add(iface.getProjectId());
+            ApiInterface iface = resolveInterface(r);
+            if (iface == null) {
+                // 孤儿规则（所属接口已删除）：无法判定归属项目，跳过而不是让整批失败
+                log.warn("批量删除跳过孤儿规则: ruleId={}, interfaceId={}", r.getId(), r.getInterfaceId());
+                continue;
             }
+            projectIds.add(iface.getProjectId());
+            deletable.add(r.getId());
         }
-        ruleMapper.deleteBatchIds(ids);
+        if (deletable.isEmpty()) {
+            return;
+        }
+        // 只删除已鉴权通过的那些 id：不能直接 deleteBatchIds(ids)，
+        // 否则会连带删掉不在 rules 里的 id 指向的行
+        ruleMapper.deleteBatchIds(deletable);
         for (Long pid : projectIds) {
             ruleCache.invalidate(pid);
         }
@@ -122,10 +137,13 @@ public class RuleService {
         // 先逐条鉴权全部通过，再统一改状态（同 deleteBatch，避免半成功）
         Set<Long> projectIds = new HashSet<>();
         for (MockRule r : rules) {
-            ApiInterface iface = interfaceService.get(r.getInterfaceId());
-            if (iface != null) {
-                projectIds.add(iface.getProjectId());
+            ApiInterface iface = resolveInterface(r);
+            if (iface == null) {
+                // 孤儿规则：无法判定归属项目，跳过
+                log.warn("批量改状态跳过孤儿规则: ruleId={}, interfaceId={}", r.getId(), r.getInterfaceId());
+                continue;
             }
+            projectIds.add(iface.getProjectId());
         }
         for (MockRule r : rules) {
             r.setStatus(status);
@@ -134,6 +152,22 @@ public class RuleService {
         for (Long pid : projectIds) {
             ruleCache.invalidate(pid);
         }
+    }
+
+    /**
+     * 解析规则所属接口并做成员鉴权。
+     *
+     * @return 所属接口；所属接口已删除（孤儿规则）时返回 null
+     * @throws BizException 无权访问该项目时抛出
+     */
+    private ApiInterface resolveInterface(MockRule rule) {
+        ApiInterface iface = interfaceService.find(rule.getInterfaceId());
+        if (iface == null) {
+            return null;
+        }
+        // 鉴权：无权访问则抛 FORBIDDEN（整批回滚）
+        interfaceService.authzCheck(iface);
+        return iface;
     }
 
     @Transactional

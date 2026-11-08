@@ -23,7 +23,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 
@@ -100,6 +102,8 @@ public class ProjectService {
             project.setStatus(Constants.STATUS_ENABLED);
         }
         project.setRuleVersion(Constants.INITIAL_RULE_VERSION);
+        // CI 令牌由服务端生成（Project.ciToken 已 @JsonIgnore，客户端无法注入）
+        project.setCiToken(newCiToken());
         projectMapper.insert(project);
         // 创建者作为项目管理员
         Long uid = AuthContext.currentUserId();
@@ -179,6 +183,37 @@ public class ProjectService {
     }
 
     /**
+     * 查看 CI 令牌：仅项目管理员。
+     *
+     * <p>令牌是免 JWT 触发本项目场景运行的凭据，普通成员不应看到。
+     */
+    public Map<String, Object> getCiToken(Long id) {
+        authz.requireAdmin(id);
+        Project p = projectMapper.selectById(id);
+        if (p == null) {
+            throw new BizException(ResultCode.PROJECT_NOT_FOUND);
+        }
+        Map<String, Object> m = new HashMap<>();
+        m.put("ciToken", p.getCiToken());
+        return m;
+    }
+
+    /** 轮换 CI 令牌：生成新随机令牌并落库，旧令牌立即失效。 */
+    @Transactional
+    public Map<String, Object> rotateCiToken(Long id) {
+        authz.requireAdmin(id);
+        Project p = projectMapper.selectById(id);
+        if (p == null) {
+            throw new BizException(ResultCode.PROJECT_NOT_FOUND);
+        }
+        p.setCiToken(java.util.UUID.randomUUID().toString().replace("-", ""));
+        projectMapper.updateById(p);
+        Map<String, Object> m = new HashMap<>();
+        m.put("ciToken", p.getCiToken());
+        return m;
+    }
+
+    /**
      * 一键生成示例项目：含 2 个 HTTP 接口与若干 Mock 规则（兜底、条件命中、随机延迟），
      * 供新用户立即体验「配接口 → 发请求 → 命中规则」闭环。可随时删除。
      */
@@ -191,6 +226,7 @@ public class ProjectService {
         p.setRemark("系统自动生成的示例（HTTP 接口 + Mock 规则 + 延迟演示），可随时删除");
         p.setStatus(Constants.STATUS_ENABLED);
         p.setRuleVersion(Constants.INITIAL_RULE_VERSION);
+        p.setCiToken(newCiToken());
         projectMapper.insert(p);
 
         Long uid = AuthContext.currentUserId();
@@ -220,8 +256,12 @@ public class ProjectService {
         return p;
     }
 
-    private String uniqueSampleCode() {
-        for (int i = 0; i < 1000; i++) {
+    /** 生成随机 CI 令牌（32 位十六进制）。 */
+    private String newCiToken() {
+        return java.util.UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String uniqueSampleCode() {        for (int i = 0; i < 1000; i++) {
             String code = i == 0 ? "demo" : "demo" + i;
             Long c = projectMapper.selectCount(new LambdaQueryWrapper<Project>().eq(Project::getCode, code));
             if (c == null || c == 0) {

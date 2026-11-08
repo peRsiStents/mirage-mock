@@ -16,6 +16,9 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.socket.ChannelInputShutdownEvent;
+import io.netty.handler.codec.TooLongFrameException;
+import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.AttributeKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,11 +73,39 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
         manager.unregisterChannel(runtime.getListener().getId(), ctx.channel());
+        // close_end 模式：真正的报文边界是「对端关闭输入」，此时处理累积的完整报文
         ByteBuf acc = ctx.channel().attr(ACC).get();
         if (acc != null) {
-            acc.release();
-            ctx.channel().attr(ACC).set(null);
+            try {
+                if (!runtime.isFramed() && acc.readableBytes() > 0) {
+                    byte[] frame = readBytes(acc);
+                    acc.clear();
+                    process(ctx, frame);
+                }
+            } finally {
+                acc.release();
+                ctx.channel().attr(ACC).set(null);
+            }
         }
+    }
+
+    /**
+     * 管道异常收尾：解码异常（如帧超长）必须关闭连接，
+     * 否则连接变成僵尸（Netty 默认只打一条 WARN，不关连接），
+     * 配合无连接数上限会导致连接与日志双重堆积。
+     */
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        if (!runtime.isFramed() && cause instanceof TooLongFrameException) {
+            log.warn("TCP 帧超长，关闭连接: listener={}, port={}, maxFrameLength={}",
+                    runtime.getListener().getName(), runtime.getListener().getPort(),
+                    runtime.getListener().getFrameConfig());
+        } else {
+            log.warn("TCP 通道异常，关闭连接: listener={}, port={}, cause={}",
+                    runtime.getListener().getName(), runtime.getListener().getPort(),
+                    cause == null ? "unknown" : cause.getClass().getSimpleName());
+        }
+        ctx.close();
     }
 
     @Override
@@ -85,7 +116,7 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
                 byte[] frame = readBytes(buf);
                 process(ctx, frame);
             } else {
-                // close_end：累积
+                // close_end：累积（报文边界在 channelInactive / 半关闭事件）
                 ByteBuf acc = ctx.channel().attr(ACC).get();
                 if (acc == null) {
                     acc = ctx.alloc().buffer();
@@ -98,9 +129,16 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    /**
+     * close_end 模式的报文终结点：对端半关闭（shutdownOutput）时触发，
+     * 此时累积缓冲即为完整报文。
+     *
+     * <p>注意：channelReadComplete 每次 socket 读循环后都会触发，不是报文边界，
+     * 在那里处理会把一条大报文拆成多条「完整报文」。
+     */
     @Override
-    public void channelReadComplete(ChannelHandlerContext ctx) {
-        if (!runtime.isFramed()) {
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (!runtime.isFramed() && evt instanceof ChannelInputShutdownEvent) {
             ByteBuf acc = ctx.channel().attr(ACC).get();
             if (acc != null && acc.readableBytes() > 0) {
                 byte[] frame = readBytes(acc);
@@ -108,6 +146,12 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
                 process(ctx, frame);
             }
         }
+        if (evt instanceof IdleStateEvent) {
+            log.debug("TCP 连接空闲超时，关闭: listener={}", runtime.getListener().getName());
+            ctx.close();
+            return;
+        }
+        super.userEventTriggered(ctx, evt);
     }
 
     private void process(ChannelHandlerContext ctx, byte[] frame) {
@@ -120,7 +164,7 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
         Long ifaceId = null;
         Long ruleId = null;
         boolean matched = false;
-        boolean closeAfter = false;
+        int delayMs = 0;
 
         try {
             fields = runtime.getParser().parse(frame, runtime.getFormatConfig());
@@ -130,12 +174,18 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
             ifaceId = result.getInterfaceId();
             ruleId = result.getRuleId();
             matched = result.isMatched();
+            delayMs = result.getDelayMs() == null ? 0 : result.getDelayMs();
 
             switch (result.getAction()) {
                 case RESET:
                     ctx.close();
                     return;
                 case TIMEOUT:
+                    // TIMEOUT 故障：延迟后不回任何数据（客户端干等到超时）；
+                    // 短连接模式下应关闭连接，避免客户端无限等待
+                    if ("SHORT".equalsIgnoreCase(listener.getConnMode())) {
+                        ctx.close();
+                    }
                     return;
                 case WRITE:
                 default:
@@ -147,11 +197,13 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
             respBytes = FrameEncoder.encode(payloadBytes, listener.getFrameConfig());
             boolean shortConn = "SHORT".equalsIgnoreCase(listener.getConnMode());
             ByteBuf out = Unpooled.wrappedBuffer(respBytes);
-            if (shortConn) {
-                ctx.writeAndFlush(out).addListener(future -> ctx.close());
-            } else {
-                ctx.writeAndFlush(out);
+            // 延迟注入：绝不能在 EventLoop 线程上 sleep（会冻结该 worker 上所有连接），
+            // 改由 EventLoop 调度器延迟写回
+            if (delayMs > 0) {
+                ctx.executor().schedule(() -> writeResponse(ctx, out, shortConn), delayMs, TimeUnit.MILLISECONDS);
+                return;
             }
+            writeResponse(ctx, out, shortConn);
         } catch (Throwable t) {
             log.error("TCP 处理异常, listener={}, port={}", listener.getName(), listener.getPort(), t);
             try {
@@ -173,7 +225,7 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
                         .ruleId(ruleId)
                         .protocol("TCP")
                         .clientAddr(clientAddr)
-                        .requestRaw(truncate(Codec.hex(frame)))
+                        .requestRaw(truncate(Codec.hex(limitBytes(frame))))
                         .requestParsed(truncate(JsonUtils.toJson(fields)))
                         .responseRaw(truncate(new String(payloadBytes, StandardCharsets.UTF_8)))
                         .matched(matched)
@@ -183,6 +235,26 @@ public class TcpMockHandler extends ChannelInboundHandlerAdapter {
                 log.debug("TCP 日志写入失败", e);
             }
         }
+    }
+
+    /** 写回响应；短连接模式下写完即关闭 */
+    private void writeResponse(ChannelHandlerContext ctx, ByteBuf out, boolean shortConn) {
+        if (shortConn) {
+            ctx.writeAndFlush(out).addListener(future -> ctx.close());
+        } else {
+            ctx.writeAndFlush(out);
+        }
+    }
+
+    /** 日志用的字节截断：先截字节再 hex，避免 8MB 帧瞬时生成 16MB 字符串 */
+    private static byte[] limitBytes(byte[] data) {
+        int max = 4096;
+        if (data == null || data.length <= max) {
+            return data == null ? new byte[0] : data;
+        }
+        byte[] out = new byte[max];
+        System.arraycopy(data, 0, out, 0, max);
+        return out;
     }
 
     /** 渲染推送模板并写入当前连接 */

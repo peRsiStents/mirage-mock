@@ -48,6 +48,22 @@ public class InterfaceService {
         return iface;
     }
 
+    /** 按 id 取接口，不存在返回 null（不抛异常、不鉴权）。供「孤儿规则」判定使用。 */
+    public ApiInterface find(Long id) {
+        if (id == null) {
+            return null;
+        }
+        return interfaceMapper.selectById(id);
+    }
+
+    /** 对已知接口做成员鉴权（供已取到接口实体的调用方复用）。 */
+    public void authzCheck(ApiInterface iface) {
+        if (iface == null) {
+            return;
+        }
+        authz.requireMember(iface.getProjectId());
+    }
+
     @Transactional
     public ApiInterface create(ApiInterface iface) {
         if (iface.getProjectId() == null) {

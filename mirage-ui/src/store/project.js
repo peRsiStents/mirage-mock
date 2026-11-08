@@ -15,6 +15,15 @@ export const useProjectStore = defineStore('project', {
       localStorage.setItem('mirage_pid', String(p.id))
       localStorage.setItem('mirage_pcode', p.code)
       localStorage.setItem('mirage_pname', p.name || '')
+    },
+    /** 清空当前项目（当前项目被删除且无剩余可选时用） */
+    clear() {
+      this.id = ''
+      this.code = ''
+      this.name = ''
+      localStorage.removeItem('mirage_pid')
+      localStorage.removeItem('mirage_pcode')
+      localStorage.removeItem('mirage_pname')
     }
   }
 })

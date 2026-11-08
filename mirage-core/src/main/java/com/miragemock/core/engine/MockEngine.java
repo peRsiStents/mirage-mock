@@ -1,7 +1,9 @@
 package com.miragemock.core.engine;
 
+import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.MockRule;
+import com.miragemock.common.exception.BizException;
 import com.miragemock.common.util.JsonUtils;
 import com.miragemock.core.cache.CompiledInterface;
 import com.miragemock.core.cache.CompiledRule;
@@ -76,7 +78,7 @@ public class MockEngine {
 
         CompiledRule hit = null;
         for (CompiledRule rule : im.iface.getRules()) {
-            if (matcher.match(rule.getConditions(), req, im.pathVars)) {
+            if (matcher.match(rule, req, im.pathVars)) {
                 hit = rule;
                 break;
             }
@@ -146,10 +148,27 @@ public class MockEngine {
             return null;
         }
         String pattern = iface.getEntity().getHttpPath();
-        if (pattern == null || !pathMatcher.match(pattern, path)) {
+        if (pattern == null) {
             return null;
         }
-        return pathMatcher.extractUriTemplateVariables(pattern, path);
+        if (pathMatcher.match(pattern, path)) {
+            return pathMatcher.extractUriTemplateVariables(pattern, path);
+        }
+        // 尾斜杠容忍（双向）：
+        //   path 有尾斜杠、pattern 无 → /api/orders/ 命中 /api/orders
+        //   path 无尾斜杠、pattern 有 → /api/orders 命中 /api/orders/
+        if (path.length() > 1 && path.endsWith("/")) {
+            String trimmed = path.substring(0, path.length() - 1);
+            if (pathMatcher.match(pattern, trimmed)) {
+                return pathMatcher.extractUriTemplateVariables(pattern, trimmed);
+            }
+        } else if (pattern.length() > 1 && pattern.endsWith("/")) {
+            String trimmedPattern = pattern.substring(0, pattern.length() - 1);
+            if (pathMatcher.match(trimmedPattern, path)) {
+                return pathMatcher.extractUriTemplateVariables(trimmedPattern, path);
+            }
+        }
+        return null;
     }
 
     // ============ 延迟 / 故障注入 / 渲染 ============
@@ -217,9 +236,23 @@ public class MockEngine {
     }
 
     private void applyDelay(MockRule rule) {
+        long ms = computeDelayMs(rule);
+        if (ms <= 0) {
+            return;
+        }
+        try {
+            // HTTP 路径保持容器线程内 sleep（TIMEOUT 故障由 Filter 层异步化，普通延迟不占额外线程）
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** 计算规则延迟毫秒（0 表示无延迟；封顶 MAX_DELAY_MS），HTTP/TCP 共用 */
+    private long computeDelayMs(MockRule rule) {
         String type = rule.getDelayType();
         if (type == null || "NONE".equalsIgnoreCase(type)) {
-            return;
+            return 0;
         }
         long ms = 0;
         if ("FIXED".equalsIgnoreCase(type)) {
@@ -233,14 +266,7 @@ public class MockEngine {
                 ms = ThreadLocalRandom.current().nextLong(min, max + 1);
             }
         }
-        if (ms <= 0) {
-            return;
-        }
-        try {
-            Thread.sleep(Math.min(ms, MAX_DELAY_MS));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        return ms <= 0 ? 0 : Math.min(ms, MAX_DELAY_MS);
     }
 
     private MockResponse noRuleResponse(RequestSnapshot req) {
@@ -275,7 +301,7 @@ public class MockEngine {
                 .build();
         CompiledRule hit = null;
         for (CompiledRule rule : iface.getRules()) {
-            if (matcher.match(rule.getConditions(), rs, new HashMap<>())) {
+            if (matcher.match(rule, rs, new HashMap<>())) {
                 hit = rule;
                 break;
             }
@@ -284,13 +310,14 @@ public class MockEngine {
             return TcpMockResult.notMatched(projectId, iface.getId(), routeValue);
         }
 
-        applyDelay(hit.getEntity());
+        // TCP 路径引擎不 sleep：延迟值放进结果，由 TcpMockHandler 调度（见 TcpMockResult.delayMs）
+        int delayMs = (int) computeDelayMs(hit.getEntity());
         String fault = hit.getEntity().getFaultType();
         if ("RESET".equalsIgnoreCase(fault)) {
-            return TcpMockResult.fault(projectId, iface.getId(), hit.getId(), TcpMockResult.Action.RESET);
+            return withDelay(TcpMockResult.fault(projectId, iface.getId(), hit.getId(), TcpMockResult.Action.RESET), delayMs);
         }
         if ("TIMEOUT".equalsIgnoreCase(fault)) {
-            return TcpMockResult.fault(projectId, iface.getId(), hit.getId(), TcpMockResult.Action.TIMEOUT);
+            return withDelay(TcpMockResult.fault(projectId, iface.getId(), hit.getId(), TcpMockResult.Action.TIMEOUT), delayMs);
         }
 
         Map<String, Object> baseVars = new HashMap<>();
@@ -298,10 +325,22 @@ public class MockEngine {
         EvalContext ctx = new EvalContext(baseVars, secretResolver, seqProvider, projectId);
         RenderedResponse rr = renderer.render(hit.getTemplateNode(), baseVars, ctx);
         Object body = rr.getBody();
-        Map<String, Object> respFields = (body instanceof Map)
-                ? (Map<String, Object>) body
-                : body == null ? new LinkedHashMap<>() : new LinkedHashMap<>();
-        return TcpMockResult.write(projectId, iface.getId(), hit.getId(), respFields);
+        if (!(body instanceof Map)) {
+            // 渲染结果非 JSON 对象（数组/标量/null）无法编码为 TCP 报文字段，直接报错而非静默空响应
+            throw new BizException(ResultCode.TEMPLATE_RENDER_ERROR,
+                    "TCP 响应模板渲染结果必须为 JSON 对象，实际为: "
+                            + (body == null ? "null" : body.getClass().getSimpleName()));
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> respFields = (Map<String, Object>) body;
+        return withDelay(TcpMockResult.write(projectId, iface.getId(), hit.getId(), respFields), delayMs);
+    }
+
+    private static TcpMockResult withDelay(TcpMockResult r, int delayMs) {
+        if (delayMs > 0) {
+            r.setDelayMs(delayMs);
+        }
+        return r;
     }
 
     private CompiledInterface findTcpInterface(ProjectSnapshot snap, Long listenerId, String routeValue) {

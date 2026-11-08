@@ -24,9 +24,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final String BEARER = "Bearer ";
 
     private final JwtUtil jwtUtil;
+    private final TokenRevocationChecker revocationChecker;
 
     public JwtAuthFilter(JwtUtil jwtUtil) {
+        this(jwtUtil, null);
+    }
+
+    public JwtAuthFilter(JwtUtil jwtUtil, TokenRevocationChecker revocationChecker) {
         this.jwtUtil = jwtUtil;
+        this.revocationChecker = revocationChecker;
     }
 
     @Override
@@ -48,6 +54,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             Long uid = claims.get("uid", Long.class);
             if (uid == null) {
                 uid = parseLong(claims.getId());
+            }
+            // 账号被停用/删除后，旧 token 应失效（否则停用形同虚设，直到 TTL 过期）
+            if (revocationChecker != null && !revocationChecker.isActive(uid)) {
+                log.info("账号已停用或不存在，拒绝该令牌: userId={}", uid);
+                unauthorized(response, ResultCode.UNAUTHORIZED);
+                return;
             }
             String username = claims.get("username", String.class);
             Boolean admin = claims.get("admin", Boolean.class);

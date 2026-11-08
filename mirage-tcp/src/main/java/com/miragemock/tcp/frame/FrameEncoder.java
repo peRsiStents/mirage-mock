@@ -37,9 +37,44 @@ public final class FrameEncoder {
             case "close_end":
                 return payload;
             case "length_field":
-            default:
-                return withLengthHeader(payload, intOf(cfg.get("lenBytes"), 4));
+            default: {
+                int lenBytes = intOf(cfg.get("lenBytes"), 4);
+                int offset = intOf(cfg.get("offset"), 0);
+                int adjustment = intOf(cfg.get("adjustment"), 0);
+                // offset>0：长度头前面还有 offset 字节（前缀）。原实现直接写头部，
+                // 生成的帧与服务端解码器期望的布局不一致 → 客户端与服务端互相读错位。
+                byte[] prefix = buildPrefix(cfg, offset);
+                return concat(prefix, withLengthHeader(payload, lenBytes, adjustment));
+            }
         }
+    }
+
+    /**
+     * 构造长度头之前的前缀字节。
+     *
+     * <p>优先用 frame_config 的 {@code prefix_hex}（如 "0A0B" 表示魔数），缺省补 0x00 占位。
+     * 长度以字节计（不是 hex 字符数）。
+     */
+    private static byte[] buildPrefix(Map<String, Object> cfg, int offset) {
+        if (offset <= 0) {
+            return new byte[0];
+        }
+        String hex = str(cfg.get("prefix_hex"), "");
+        if (hex != null && !hex.trim().isEmpty()) {
+            String cleaned = hex.trim();
+            if (cleaned.startsWith("0x") || cleaned.startsWith("0X")) {
+                cleaned = cleaned.substring(2);
+            }
+            byte[] decoded = Codec.hexDecode(cleaned);
+            if (decoded.length > offset) {
+                // 前缀比 offset 长：只保留前 offset 字节，保证布局与服务端解码器一致
+                return Arrays.copyOf(decoded, offset);
+            }
+            byte[] padded = new byte[offset];
+            System.arraycopy(decoded, 0, padded, 0, decoded.length);
+            return padded;
+        }
+        return new byte[offset];
     }
 
     /**
@@ -62,10 +97,14 @@ public final class FrameEncoder {
             case "close_end":
                 return framed;
             case "length_field":
-            default:
+            default: {
                 int lenBytes = intOf(cfg.get("lenBytes"), 4);
-                return stripLengthField(framed, lenBytes, intOf(cfg.get("offset"), 0),
-                        intOf(cfg.get("adjustment"), 0), intOf(cfg.get("initialStrip"), lenBytes));
+                int offset = intOf(cfg.get("offset"), 0);
+                int adjustment = intOf(cfg.get("adjustment"), 0);
+                // 与 FrameDecoderFactory 保持一致：offset>0 时默认剥离 offset+lenBytes
+                int initialStrip = intOf(cfg.get("initialStrip"), offset + lenBytes);
+                return stripLengthField(framed, lenBytes, offset, adjustment, initialStrip);
+            }
         }
     }
 
@@ -100,11 +139,26 @@ public final class FrameEncoder {
     }
 
     private static byte[] withLengthHeader(byte[] payload, int lenBytes) {
+        return withLengthHeader(payload, lenBytes, 0);
+    }
+
+    /**
+     * 前置大端长度头。
+     *
+     * @param adjustment 与 Netty {@code LengthFieldBasedFrameDecoder} 语义一致的长度修正值：
+     *                   帧总长 = offset + lenBytes + 声明长度 + adjustment。
+     *                   因此声明长度 = payload 长度 - adjustment（adjustment 通常是
+     *                   「长度字段未计入、但属于本帧」的尾部字节数，如 CRC）。
+     */
+    private static byte[] withLengthHeader(byte[] payload, int lenBytes, int adjustment) {
         if (lenBytes <= 0) {
             return payload;
         }
         byte[] header = new byte[lenBytes];
-        long len = payload.length;
+        long len = payload.length - adjustment;
+        if (len < 0) {
+            len = 0;
+        }
         for (int i = lenBytes - 1; i >= 0; i--) {
             header[i] = (byte) (len & 0xFF);
             len >>>= 8;

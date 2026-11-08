@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.miragemock.admin.dto.UserRequest;
 import com.miragemock.admin.mapper.UserAccountMapper;
 import com.miragemock.admin.security.AuthContext;
+import com.miragemock.admin.security.TokenRevocationChecker;
 import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
 import com.miragemock.common.entity.UserAccount;
@@ -23,11 +24,14 @@ public class UserService {
 
     private final UserAccountMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final TokenRevocationChecker revocationChecker;
 
     @Autowired
-    public UserService(UserAccountMapper userMapper, PasswordEncoder passwordEncoder) {
+    public UserService(UserAccountMapper userMapper, PasswordEncoder passwordEncoder,
+                       TokenRevocationChecker revocationChecker) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
+        this.revocationChecker = revocationChecker;
     }
 
     /**
@@ -37,7 +41,16 @@ public class UserService {
     public List<UserAccount> list() {
         List<UserAccount> all = userMapper.selectList(
                 new LambdaQueryWrapper<UserAccount>().orderByDesc(UserAccount::getCreateTime));
-        all.forEach(this::mask);
+        boolean admin = AuthContext.isAdmin();
+        all.forEach(u -> {
+            mask(u);
+            if (!admin) {
+                // 非管理员不需要（也不应看到）管理员标记与账号状态：
+                // 这些字段可被用来推断账号构成，减少暴露面。
+                u.setIsAdmin(null);
+                u.setStatus(null);
+            }
+        });
         return all;
     }
 
@@ -47,9 +60,7 @@ public class UserService {
         if (req.getUsername() == null || req.getUsername().trim().isEmpty()) {
             throw new BizException(ResultCode.BAD_REQUEST, "用户名不能为空");
         }
-        if (req.getPassword() == null || req.getPassword().isEmpty()) {
-            throw new BizException(ResultCode.BAD_REQUEST, "密码不能为空");
-        }
+        validatePassword(req.getPassword());
         Long count = userMapper.selectCount(
                 new LambdaQueryWrapper<UserAccount>().eq(UserAccount::getUsername, req.getUsername()));
         if (count != null && count > 0) {
@@ -80,9 +91,12 @@ public class UserService {
         }
         // 非空密码视为重置密码
         if (req.getPassword() != null && !req.getPassword().isEmpty()) {
+            validatePassword(req.getPassword());
             u.setPasswordHash(passwordEncoder.encode(req.getPassword()));
         }
         userMapper.updateById(u);
+        // 状态/密码/管理员标记变更后，旧 token 应尽快失效
+        revocationChecker.invalidate(id);
         return mask(u);
     }
 
@@ -97,6 +111,17 @@ public class UserService {
             throw new BizException(ResultCode.BAD_REQUEST, "不能删除当前登录账号");
         }
         userMapper.deleteById(id);
+        revocationChecker.invalidate(id);
+    }
+
+    /** 密码强度：至少 8 位（BCrypt 只取前 72 字节，超长无意义）。 */
+    private void validatePassword(String password) {
+        if (password == null || password.isEmpty()) {
+            throw new BizException(ResultCode.BAD_REQUEST, "密码不能为空");
+        }
+        if (password.length() < 8) {
+            throw new BizException(ResultCode.BAD_REQUEST, "密码长度至少 8 位");
+        }
     }
 
     private UserAccount get(Long id) {

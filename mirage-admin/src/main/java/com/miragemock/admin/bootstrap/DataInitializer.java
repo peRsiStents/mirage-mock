@@ -37,6 +37,9 @@ public class DataInitializer implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DataInitializer.class);
 
+    /** 默认管理员初始口令（文档公开值；生产请用环境变量 MIRAGE_ADMIN_PASSWORD 覆盖） */
+    private static final String DEFAULT_ADMIN_PASSWORD = "admin123";
+
     private static final String GRAY_TEMPLATE =
             "{\"status\":200,\"headers\":{\"X-Mock-Rule\":\"gray\"},\"body\":{\"code\":\"0000\",\"message\":\"success\","
                     + "\"data\":{\"userId\":\"${path.userId}\",\"level\":\"VIP\",\"userName\":\"${name.cn}\","
@@ -104,14 +107,26 @@ public class DataInitializer implements CommandLineRunner {
         if (count != null && count > 0) {
             return;
         }
+        // 初始口令可通过环境变量覆盖；未覆盖时用文档中的默认值
+        String pwd = System.getenv("MIRAGE_ADMIN_PASSWORD");
+        boolean custom = pwd != null && !pwd.trim().isEmpty();
+        if (!custom) {
+            pwd = DEFAULT_ADMIN_PASSWORD;
+        }
         UserAccount admin = new UserAccount();
         admin.setUsername("admin");
-        admin.setPasswordHash(passwordEncoder.encode("admin123"));
+        admin.setPasswordHash(passwordEncoder.encode(pwd));
         admin.setNickname("管理员");
         admin.setIsAdmin(1);
         admin.setStatus(1);
         userMapper.insert(admin);
-        log.info("已创建默认管理员账号: admin / admin123");
+        // 自定义口令不落日志（日志会被采集到集中式系统，等同于口令泄露）；
+        // 默认口令本就公开在文档里，可提示但不重复打印
+        if (custom) {
+            log.info("已创建默认管理员账号: admin（初始口令来自环境变量 MIRAGE_ADMIN_PASSWORD，请登录后立即修改）");
+        } else {
+            log.info("已创建默认管理员账号: admin（初始口令为文档默认口令，请登录后立即修改）");
+        }
     }
 
     private Project seedDemo() {

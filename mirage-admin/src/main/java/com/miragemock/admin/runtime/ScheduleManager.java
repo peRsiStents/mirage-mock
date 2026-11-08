@@ -5,6 +5,7 @@ import com.miragemock.admin.dto.ScenarioRunResult;
 import com.miragemock.admin.mapper.TestScheduleMapper;
 import com.miragemock.admin.service.ScenarioService;
 import com.miragemock.common.entity.TestSchedule;
+import com.miragemock.common.exception.BizException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -90,6 +91,14 @@ public class ScheduleManager {
             scheduleMapper.updateById(s);
             log.info("定时任务 {} 执行完成: scenario={}, passed={}", scheduleId, s.getScenarioId(), result.getPassed());
             return result;
+        } catch (BizException e) {
+            // 业务异常（如环境跨项目、场景不存在）保留原类型抛出，
+            // 否则「立即运行」接口会返回 500 而不是可读的业务错误码
+            log.warn("定时任务 {} 执行失败: {}", scheduleId, e.getMessage());
+            s.setLastRunTime(LocalDateTime.now());
+            s.setLastPassed(0);
+            scheduleMapper.updateById(s);
+            throw e;
         } catch (Exception e) {
             log.error("定时任务 {} 执行异常: {}", scheduleId, e.getMessage(), e);
             s.setLastRunTime(LocalDateTime.now());

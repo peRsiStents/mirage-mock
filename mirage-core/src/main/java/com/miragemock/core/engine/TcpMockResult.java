@@ -25,6 +25,11 @@ public class TcpMockResult {
     private Long ruleId;
     private boolean matched;
     private Action action;
+    /**
+     * 延迟毫秒数（可为 null 表示无延迟）。引擎不再 sleep，仅携带延迟值，
+     * 由 TcpMockHandler 在回写前自行调度等待（封顶与引擎侧一致，见 MockEngine）。
+     */
+    private Integer delayMs;
     /** 渲染后的响应字段（WRITE 时由处理器按报文格式编码） */
     private Map<String, Object> fields;
 

@@ -101,9 +101,10 @@
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { confirmAction } from '../utils/confirm'
 import FunctionMarketSidebar from './FunctionMarketSidebar.vue'
 
 const props = defineProps({
@@ -235,6 +236,20 @@ async function onPreview() {
 function buildPayload() {
   let template
   try { template = JSON.parse(templateText.value) } catch (e) { throw new Error('响应模板不是合法 JSON') }
+  // 延迟参数校验：后端对 RANDOM 的 max<=min 会静默取 min（用户以为设置了区间，
+  // 实际没有随机效果），对 FIXED 的负值会被当成 0。这里提前拦下并说明。
+  const dt = form.value.delayType
+  if (dt === 'FIXED') {
+    const ms = Number(form.value.delayMs)
+    if (!Number.isFinite(ms) || ms < 0) throw new Error('固定延迟必须是不小于 0 的毫秒数')
+  } else if (dt === 'RANDOM') {
+    const min = Number(form.value.delayMinMs)
+    const max = Number(form.value.delayMaxMs)
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < 0) {
+      throw new Error('随机延迟的最小/最大值必须是不小于 0 的毫秒数')
+    }
+    if (max < min) throw new Error(`随机延迟的最大值(${max})不能小于最小值(${min})`)
+  }
   const matchCondition = conditions.value.map((c) => {
     // 防呆：trim key 与 value 首尾空格（前导空格会让 JSONPath/键名失配导致不命中）
     const key = (c.key || '').trim()
@@ -282,15 +297,11 @@ async function onSave() {
   // 空匹配条件 = 兜底规则（仅当所有条件都被清空时提示，避免误建）
   const hasCond = Array.isArray(payload.matchCondition) && payload.matchCondition.some((c) => c.key)
   if (!hasCond) {
-    try {
-      await ElMessageBox.confirm(
-        '当前没有有效的匹配条件，此规则将作为「兜底规则」（优先级最低、仅当其它规则都不命中时生效）。确认这样保存？',
-        '将保存为兜底规则',
-        { type: 'warning', confirmButtonText: '保存为兜底', cancelButtonText: '回去补充条件' }
-      )
-    } catch (e) {
-      return // 用户取消
-    }
+    const ok = await confirmAction(
+      '当前没有有效的匹配条件，此规则将作为「兜底规则」（优先级最低、仅当其它规则都不命中时生效）。确认这样保存？',
+      { title: '将保存为兜底规则', confirmButtonText: '保存为兜底', cancelButtonText: '回去补充条件' }
+    )
+    if (!ok) return // 用户取消
   }
   saving.value = true
   try {

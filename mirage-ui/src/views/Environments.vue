@@ -51,10 +51,12 @@
 
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { createGuard } from '../api/client'
 import { useProjectStore } from '../store/project'
+import { confirmAction } from '../utils/confirm'
 
 const proj = useProjectStore()
 const list = ref([])
@@ -66,10 +68,16 @@ const vars = ref([])
 
 function parseArr(s) { try { return JSON.parse(s || '[]') } catch (e) { return [] } }
 
+// 切换项目时旧的取数请求可能后到，只让最新一次的响应回写，避免串项目的陈旧数据
+const fetchEnvs = createGuard((pid) => api.environments.list(pid))
+
 async function load() {
   if (!proj.id) return
   loading.value = true
-  try { const res = await api.environments.list(proj.id); list.value = res.data || [] } finally { loading.value = false }
+  try {
+    const res = await fetchEnvs(proj.id)
+    if (res) list.value = res.data || []
+  } finally { loading.value = false }
 }
 
 function openCreate() {
@@ -99,7 +107,7 @@ async function onSave() {
 }
 
 async function onRemove(row) {
-  await ElMessageBox.confirm(`删除环境「${row.name}」？`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`删除环境「${row.name}」？`, { title: '警告' }))) return
   await api.environments.remove(row.id); ElMessage.success('已删除'); load()
 }
 

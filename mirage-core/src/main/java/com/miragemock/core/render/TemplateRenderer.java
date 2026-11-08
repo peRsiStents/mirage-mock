@@ -39,6 +39,11 @@ public class TemplateRenderer {
     private static final Logger log = LoggerFactory.getLogger(TemplateRenderer.class);
     private static final Pattern TOKEN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*");
 
+    /** repeat 次数上限 */
+    private static final int REPEAT_MAX_N = 10_000;
+    /** repeat 生成规模上限：n × 子模板叶子数 */
+    private static final int REPEAT_MAX_TOTAL_LEAVES = 50_000;
+
     private final ExpressionEvaluator evaluator;
 
     @Autowired
@@ -54,6 +59,20 @@ public class TemplateRenderer {
      * @param baseCtx      提供密钥解析器 / 序列提供者 / projectId
      */
     public RenderedResponse render(JsonNode templateNode, Map<String, Object> baseVars, EvalContext baseCtx) {
+        try {
+            return doRender(templateNode, baseVars, baseCtx);
+        } catch (BizException e) {
+            // 已是友好业务错误（字段渲染失败/循环依赖等），原样抛出
+            throw e;
+        } catch (RuntimeException e) {
+            // 统一转友好错误，避免裸 500 泄漏 BC/JDK 内部异常类名；详情仅记录服务端日志
+            log.error("模板渲染异常", e);
+            String msg = e.getMessage() == null || e.getMessage().isEmpty() ? "未知错误" : e.getMessage();
+            throw new BizException(ResultCode.TEMPLATE_RENDER_ERROR, "模板渲染失败: " + msg, e);
+        }
+    }
+
+    private RenderedResponse doRender(JsonNode templateNode, Map<String, Object> baseVars, EvalContext baseCtx) {
         if (templateNode == null || templateNode.isNull()) {
             return RenderedResponse.of(200, null, null);
         }

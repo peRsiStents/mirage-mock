@@ -39,7 +39,10 @@ public final class FrameDecoderFactory {
                 int lenBytes = intOf(cfg.get("lenBytes"), 4);
                 int offset = intOf(cfg.get("offset"), 0);
                 int adjustment = intOf(cfg.get("adjustment"), 0);
-                int strip = intOf(cfg.get("initialStrip"), lenBytes);
+                // Netty 的 initialBytesToStrip 是「从帧起始处算」的字节数：
+                // offset>0 时帧前面还有 offset 字节前缀，默认应剥离 offset+lenBytes，
+                // 否则前缀会混进 payload，导致解析出多余字段。
+                int strip = intOf(cfg.get("initialStrip"), offset + lenBytes);
                 // 大端（网络字节序）；小端可在此切换为带 ByteOrder 的重载
                 return new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, offset, lenBytes, adjustment, strip);
             }

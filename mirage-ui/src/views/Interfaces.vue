@@ -150,10 +150,12 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus, CopyDocument, Delete, Top, Bottom } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { createGuard } from '../api/client'
 import { useProjectStore } from '../store/project'
+import { confirmAction } from '../utils/confirm'
 import { copyText as copy } from '../utils/clipboard'
 import { pinyin } from 'pinyin-pro'
 import RuleEditor from '../components/RuleEditor.vue'
@@ -161,6 +163,9 @@ import ResponseBody from '../components/ResponseBody.vue'
 
 const proj = useProjectStore()
 const interfaces = ref([])
+// 竞态防护：快速切项目时旧响应不回写
+const fetchInterfaces = createGuard((pid) => api.interfaces.list(pid))
+const fetchRules = createGuard((iid) => api.rules.list(iid))
 const loading = ref(false)
 const keyword = ref('')
 const filtered = computed(() => {
@@ -225,10 +230,12 @@ async function loadInterfaces() {
   if (!proj.id) return
   loading.value = true
   try {
-    const res = await api.interfaces.list(proj.id)
-    interfaces.value = res.data || []
-    if (!currentInterface.value && interfaces.value.length) {
-      onSelectInterface(interfaces.value[0])
+    const res = await fetchInterfaces(proj.id)
+    if (res) {
+      interfaces.value = res.data || []
+      if (!currentInterface.value && interfaces.value.length) {
+        onSelectInterface(interfaces.value[0])
+      }
     }
   } finally {
     loading.value = false
@@ -243,8 +250,8 @@ async function loadListeners() {
 
 async function loadRules() {
   if (!currentInterface.value) return
-  const res = await api.rules.list(currentInterface.value.id)
-  rules.value = res.data || []
+  const res = await fetchRules(currentInterface.value.id)
+  if (res) rules.value = res.data || []
 }
 
 function onSelectInterface(row) {
@@ -262,7 +269,18 @@ function openCreateInterface() {
 
 function openEditInterface(row) {
   pathManuallyEdited.value = true
-  Object.assign(ifaceForm, row)
+  // 显式字段赋值，避免整行 Object.assign 把行上的多余字段（createTime/ruleVersion 等）灌进表单
+  Object.assign(ifaceForm, {
+    id: row.id,
+    name: row.name || '',
+    protocol: row.protocol || 'HTTP',
+    httpMethod: row.httpMethod || 'GET',
+    httpPath: row.httpPath || '',
+    tcpListenerId: row.tcpListenerId ?? null,
+    tcpRouteExpr: row.tcpRouteExpr || '',
+    status: row.status == null ? 1 : row.status,
+    remark: row.remark || ''
+  })
   loadListeners()
   ifaceVisible.value = true
 }
@@ -288,7 +306,7 @@ async function saveInterface() {
 }
 
 async function onRemoveInterface(row) {
-  await ElMessageBox.confirm(`删除接口「${row.name}」及其全部规则？`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`删除接口「${row.name}」及其全部规则？`))) return
   await api.interfaces.remove(row.id)
   ElMessage.success('已删除')
   if (currentInterface.value && currentInterface.value.id === row.id) currentInterface.value = null
@@ -306,7 +324,7 @@ function openEditRule(row) {
 }
 
 async function onRemoveRule(row) {
-  await ElMessageBox.confirm(`删除规则「${row.name}」？`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`删除规则「${row.name}」？`))) return
   await api.rules.remove(row.id)
   ElMessage.success('已删除')
   loadRules()
@@ -315,7 +333,7 @@ async function onRemoveRule(row) {
 function onRuleSelectionChange(rows) { selectedRules.value = rows }
 async function onBatchRemoveRules() {
   if (!selectedRules.value.length) return
-  await ElMessageBox.confirm(`确认删除选中的 ${selectedRules.value.length} 条规则？`, '批量删除', { type: 'warning' })
+  if (!(await confirmAction(`确认删除选中的 ${selectedRules.value.length} 条规则？`, { title: '批量删除' }))) return
   try {
     await api.rules.removeBatch(selectedRules.value.map((r) => r.id))
     ElMessage.success('已删除 ' + selectedRules.value.length + ' 条')
@@ -373,12 +391,15 @@ async function onTryMock(row) {
   if (!url) { ElMessage.warning('无法生成 Mock 访问地址（HTTP 端口未开启？）'); return }
   trying[row.id] = true
   try {
-    const resp = await fetch(url, { method: 'GET' })
+    // 超时保护：规则可能注入大延迟/超时故障，避免 fetch 无限挂起（老浏览器降级为无超时）
+    let signal
+    try { signal = AbortSignal.timeout(60000) } catch (e) { signal = undefined }
+    const resp = await fetch(url, { method: 'GET', signal })
     const text = await resp.text()
     tryResult.value = { status: resp.status, body: text, url }
     tryVisible.value = true
   } catch (e) {
-    ElMessage.error('试跑失败：' + (e?.message || '网络错误'))
+    ElMessage.error('试跑失败：' + (e?.name === 'TimeoutError' ? '请求超时（60s）' : (e?.message || '网络错误')))
   } finally {
     trying[row.id] = false
   }

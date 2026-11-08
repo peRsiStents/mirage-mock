@@ -31,6 +31,7 @@ import com.miragemock.common.entity.FileTemplate;
 import com.miragemock.common.entity.MockRequestLog;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -88,8 +89,13 @@ public class ProjectDataCleaner {
         // 场景 + 步骤（步骤按 scenarioId 归属，需先收集场景 id 再删步骤）
         List<TestScenario> scenarios = scenarioMapper.selectList(new LambdaQueryWrapper<TestScenario>()
                 .eq(TestScenario::getProjectId, projectId));
-        for (TestScenario sc : scenarios) {
-            stepMapper.delete(new LambdaQueryWrapper<TestScenarioStep>().eq(TestScenarioStep::getScenarioId, sc.getId()));
+        // 批量删步骤：逐条 delete 会产生 N 次 SQL，项目场景多时删除明显变慢
+        if (!scenarios.isEmpty()) {
+            List<Long> scenarioIds = new ArrayList<>(scenarios.size());
+            for (TestScenario sc : scenarios) {
+                scenarioIds.add(sc.getId());
+            }
+            stepMapper.delete(new LambdaQueryWrapper<TestScenarioStep>().in(TestScenarioStep::getScenarioId, scenarioIds));
         }
         scenarioMapper.delete(new LambdaQueryWrapper<TestScenario>().eq(TestScenario::getProjectId, projectId));
 
@@ -106,8 +112,13 @@ public class ProjectDataCleaner {
         // 接口 + 规则（TCP 接口已被 TcpListenerService 清过，这里删剩余 HTTP 接口）
         List<ApiInterface> interfaces = interfaceMapper.selectList(new LambdaQueryWrapper<ApiInterface>()
                 .eq(ApiInterface::getProjectId, projectId));
-        for (ApiInterface iface : interfaces) {
-            ruleMapper.delete(new LambdaQueryWrapper<MockRule>().eq(MockRule::getInterfaceId, iface.getId()));
+        // 批量删规则：逐条 delete 会产生 N 次 SQL
+        if (!interfaces.isEmpty()) {
+            List<Long> interfaceIds = new ArrayList<>(interfaces.size());
+            for (ApiInterface iface : interfaces) {
+                interfaceIds.add(iface.getId());
+            }
+            ruleMapper.delete(new LambdaQueryWrapper<MockRule>().in(MockRule::getInterfaceId, interfaceIds));
         }
         interfaceMapper.delete(new LambdaQueryWrapper<ApiInterface>().eq(ApiInterface::getProjectId, projectId));
 

@@ -121,8 +121,16 @@ const current = computed(() => {
 async function loadProjects() {
   const res = await api.projects.list()
   projects.value = res.data || []
-  if (!proj.id && projects.value.length) {
-    onProjectChange(projects.value[0].id)
+  // 自愈：localStorage 里记的当前项目可能已被删除、或当前用户已被移出该项目，
+  // 此时不能继续拿着失效的 pid 发请求（全部 404/403），应切到一个仍可访问的项目。
+  const currentExists = projects.value.some((p) => String(p.id) === String(proj.id))
+  if (!currentExists) {
+    if (projects.value.length) {
+      onProjectChange(projects.value[0].id)
+    } else {
+      proj.clear()
+      projId.value = ''
+    }
   }
 }
 

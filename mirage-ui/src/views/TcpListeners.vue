@@ -107,9 +107,11 @@
 
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { createGuard } from '../api/client'
+import { confirmAction } from '../utils/confirm'
 import { useProjectStore } from '../store/project'
 
 const proj = useProjectStore()
@@ -157,11 +159,15 @@ function frameType(cfg) {
   try { return JSON.parse(cfg || '{}').type || '-' } catch (e) { return '-' }
 }
 
+// 切换项目时旧的取数请求可能后到，只让最新一次的响应回写，避免串项目的陈旧数据
+const fetchListeners = createGuard((pid) => api.listeners.list(pid))
+
 async function load() {
   if (!proj.id) return
   loading.value = true
   try {
-    const res = await api.listeners.list(proj.id)
+    const res = await fetchListeners(proj.id)
+    if (!res) return
     list.value = res.data || []
     for (const l of list.value) {
       api.listeners.status(l.id).then((r) => { running.value[l.id] = r.data.running }).catch(() => {})
@@ -171,8 +177,26 @@ async function load() {
   }
 }
 
-function openCreate() { Object.assign(form, emptyForm()); visible.value = true }
-function openEdit(row) { Object.assign(form, row); visible.value = true }
+function openCreate() {
+  // 显式重置全部字段：Object.assign 不会删除旧键，编辑过一次后残留的
+  // createTime/updateTime 等服务端字段会被一起提交给新建接口
+  Object.keys(form).forEach((k) => { delete form[k] })
+  Object.assign(form, emptyForm())
+  visible.value = true
+}
+function openEdit(row) {
+  // 显式字段赋值，避免整行灌入（残留服务端字段 + 新建时继承上一条的时间戳）
+  Object.assign(form, {
+    id: row.id, name: row.name || '', port: row.port == null ? 9001 : row.port,
+    connMode: row.connMode || 'LONG', matchMode: row.matchMode || 'ASYNC',
+    messageFormat: row.messageFormat || 'json',
+    frameConfig: row.frameConfig || emptyForm().frameConfig,
+    messageFormatConfig: row.messageFormatConfig || '',
+    routeExtract: row.routeExtract || '$.transCode', serialExtract: row.serialExtract || '$.serialNo',
+    pushConfig: row.pushConfig || '', status: row.status == null ? 1 : row.status
+  })
+  visible.value = true
+}
 
 async function onSave() {
   if (!form.name || !form.name.trim()) { ElMessage.warning('请输入监听器名称'); return }
@@ -196,16 +220,14 @@ async function onSave() {
 }
 
 async function onRemove(row) {
-  await ElMessageBox.confirm(`删除监听器「${row.name}」？端口将解绑，关联接口一并删除`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`删除监听器「${row.name}」？端口将解绑，关联接口一并删除`, { title: '警告' }))) return
   await api.listeners.remove(row.id)
   ElMessage.success('已删除')
   load()
 }
 
 async function start(row) {
-  try {
-    await ElMessageBox.confirm(`启动监听器「${row.name}」？将绑定端口 ${row.port}。`, '启动确认', { type: 'warning' })
-  } catch (e) { return }
+  if (!(await confirmAction(`启动监听器「${row.name}」？将绑定端口 ${row.port}。`, { title: '启动确认' }))) return
   opLoading[row.id] = true
   try {
     await api.listeners.start(row.id)
@@ -219,9 +241,7 @@ async function start(row) {
 }
 
 async function stop(row) {
-  try {
-    await ElMessageBox.confirm(`停止监听器「${row.name}」？端口 ${row.port} 将解绑，已连接的客户端会被断开。`, '停止确认', { type: 'warning' })
-  } catch (e) { return }
+  if (!(await confirmAction(`停止监听器「${row.name}」？端口 ${row.port} 将解绑，已连接的客户端会被断开。`, { title: '停止确认' }))) return
   opLoading[row.id] = true
   try {
     await api.listeners.stop(row.id)

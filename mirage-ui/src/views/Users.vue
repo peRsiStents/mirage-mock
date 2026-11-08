@@ -66,9 +66,10 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { confirmAction } from '../utils/confirm'
 
 const list = ref([])
 const loading = ref(false)
@@ -147,7 +148,7 @@ async function toggleStatus(row, v) {
 }
 
 async function onRemove(row) {
-  await ElMessageBox.confirm(`删除用户「${row.username}」？`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`删除用户「${row.username}」？`, { title: '警告' }))) return
   await api.users.remove(row.id)
   ElMessage.success('已删除')
   load()

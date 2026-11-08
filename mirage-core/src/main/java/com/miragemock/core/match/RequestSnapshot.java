@@ -1,5 +1,6 @@
 package com.miragemock.core.match;
 
+import com.jayway.jsonpath.DocumentContext;
 import lombok.Builder;
 import lombok.Data;
 
@@ -35,6 +36,15 @@ public class RequestSnapshot {
 
     /** TCP 报文字段（M2）；HTTP 下与 body 同义 */
     private Map<String, Object> fields;
+
+    /**
+     * 请求级 JSONPath 上下文懒缓存：匹配阶段对同一 bodyRaw 只 parse 一次，
+     * DocumentContext 供该请求全部条件复用（运行期临时字段，非请求数据）。
+     */
+    private transient volatile DocumentContext jsonPathContext;
+
+    /** body 非法 JSON / 为空标记：置位后不再尝试 parse */
+    private transient volatile boolean jsonPathParseFailed;
 
     private String clientAddr;
 

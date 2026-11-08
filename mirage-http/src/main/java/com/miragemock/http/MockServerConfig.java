@@ -39,6 +39,8 @@ public class MockServerConfig {
         reg.addUrlPatterns("/*");
         reg.setName("mirageMockHttpFilter");
         reg.setOrder(Ordered.HIGHEST_PRECEDENCE);
+        // 异步支持：TIMEOUT 故障注入依赖 servlet 异步挂起（不占容器线程）
+        reg.setAsyncSupported(true);
         return reg;
     }
 }

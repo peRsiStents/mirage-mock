@@ -80,6 +80,41 @@
         </resources>
 
         <plugins>
+            <!--
+                前端产物是带 hash 的（index-<hash>.js），每次 npm run build 都会生成新文件名。
+                maven-resources-plugin 只覆盖不删除，旧 hash 会一份份堆在 jar 里（实测已堆到 7 份），
+                既撑大 jar 也让静态资源目录被垃圾污染。这里在拷贝前先清空 target/classes/static。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>clean-stale-ui-assets</id>
+                        <!--
+                            必须早于 maven-resources-plugin:resources（绑在 process-resources）执行。
+                            注意：Maven 默认生命周期里没有 prepare-resources 这个阶段，
+                            绑到它会被静默忽略（执行根本不跑，旧 hash 依旧堆积），
+                            正确的是 generate-resources——它是资源拷贝前的最后一个合法阶段。
+                        -->
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                        <configuration>
+                            <!-- 只清 static 目录，不动 target 下其它产物 -->
+                            <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                            <filesets>
+                                <fileset>
+                                    <directory>${project.build.directory}/classes/static</directory>
+                                    <followSymlinks>false</followSymlinks>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

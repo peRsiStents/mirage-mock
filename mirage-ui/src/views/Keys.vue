@@ -68,10 +68,12 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { createGuard } from '../api/client'
 import { useProjectStore } from '../store/project'
+import { confirmAction } from '../utils/confirm'
 
 const proj = useProjectStore()
 const list = ref([])
@@ -87,12 +89,15 @@ const result = reactive({ alias: '', publicKey: '', privateKey: '' })
 const saving = ref(false)
 const genLoading = ref(false)
 
+// 切换项目时旧的取数请求可能后到，只让最新一次的响应回写，避免串项目的陈旧数据
+const fetchKeys = createGuard((pid) => api.keys.list(pid))
+
 async function load() {
   if (!proj.id) return
   loading.value = true
   try {
-    const res = await api.keys.list(proj.id)
-    list.value = res.data || []
+    const res = await fetchKeys(proj.id)
+    if (res) list.value = res.data || []
   } finally {
     loading.value = false
   }
@@ -146,7 +151,7 @@ async function genSm2() {
 }
 
 async function onRemove(row) {
-  await ElMessageBox.confirm(`删除密钥「${row.alias}」？引用它的模板将失效`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`删除密钥「${row.alias}」？引用它的模板将失效`, { title: '警告' }))) return
   await api.keys.remove(row.id)
   ElMessage.success('已删除')
   load()

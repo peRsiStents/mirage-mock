@@ -1,5 +1,7 @@
 package com.miragemock.admin.security;
 
+import com.miragemock.common.api.ResultCode;
+import com.miragemock.common.exception.BizException;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.HandlerMapping;
 
@@ -28,8 +30,15 @@ public class ProjectAuthzInterceptor implements HandlerInterceptor {
         if (attr instanceof Map) {
             Object pid = ((Map<?, ?>) attr).get("pid");
             if (pid != null && !"".equals(pid)) {
+                // 非数字 pid 是非法请求（400），不能抛裸 NumberFormatException（500）
+                long projectId;
+                try {
+                    projectId = Long.parseLong(String.valueOf(pid).trim());
+                } catch (NumberFormatException e) {
+                    throw new BizException(ResultCode.BAD_REQUEST, "项目 ID 非法: " + pid);
+                }
                 // requireMember 抛 BizException(FORBIDDEN) 由全局异常处理转 JSON
-                authz.requireMember(Long.valueOf(String.valueOf(pid)));
+                authz.requireMember(projectId);
             }
         }
         return true;

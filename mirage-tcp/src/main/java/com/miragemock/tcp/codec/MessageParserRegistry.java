@@ -65,6 +65,11 @@ public class MessageParserRegistry {
             }
         }
         MessageParser p = builtins.get(format);
-        return p != null ? p : builtins.get("json");
+        if (p != null) {
+            return p;
+        }
+        // 未知格式直接报错：静默回退 JSON 会让配置笔误（拼错格式名）表现成「协议不对」
+        throw new IllegalArgumentException("未知的报文格式: '" + format + "'，支持 "
+                + String.join(" / ", builtins.keySet()) + " 或 custom:<beanName>");
     }
 }

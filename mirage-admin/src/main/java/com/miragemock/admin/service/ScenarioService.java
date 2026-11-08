@@ -112,6 +112,8 @@ public class ScenarioService {
     // ============ 步骤 ============
 
     public List<TestScenarioStep> steps(Long scenarioId) {
+        // 鉴权：步骤按 scenarioId 直查，必须先校验当前用户是该场景所属项目的成员
+        get(scenarioId);
         return stepMapper.selectList(new LambdaQueryWrapper<TestScenarioStep>()
                 .eq(TestScenarioStep::getScenarioId, scenarioId)
                 .orderByAsc(TestScenarioStep::getSeq));

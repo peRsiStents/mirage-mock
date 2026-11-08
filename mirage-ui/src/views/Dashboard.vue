@@ -164,6 +164,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
+import { createGuard } from '../api/client'
 import { useProjectStore } from '../store/project'
 import { Connection, Document, Key, Promotion, Share, AlarmClock, DataAnalysis } from '@element-plus/icons-vue'
 
@@ -172,6 +173,9 @@ const proj = useProjectStore()
 const loading = ref(false)
 const data = ref({})
 const trend = ref([])
+// 竞态防护：快速切项目时旧响应不回写
+const fetchOverview = createGuard((pid) => api.dashboard.overview(pid))
+const fetchTrend = createGuard((pid) => api.dashboard.trend(pid, 7))
 
 // 趋势序列（请求量 / 命中率 / 通过率）
 const reqSeries = computed(() => trend.value.map((t) => t.requests))
@@ -222,9 +226,11 @@ async function load() {
   if (!proj.id) return
   loading.value = true
   try {
-    const res = await api.dashboard.overview(proj.id)
-    data.value = res.data || {}
-    loadTrend()
+    const res = await fetchOverview(proj.id)
+    if (res) {
+      data.value = res.data || {}
+      loadTrend()
+    }
   } finally {
     loading.value = false
   }
@@ -233,8 +239,8 @@ async function load() {
 async function loadTrend() {
   if (!proj.id) return
   try {
-    const res = await api.dashboard.trend(proj.id, 7)
-    trend.value = res.data || []
+    const res = await fetchTrend(proj.id)
+    if (res) trend.value = res.data || []
   } catch (e) {
     trend.value = []
   }

@@ -46,6 +46,11 @@ mirage:
       - fd00:ec2::254
       - metadata.google.internal
       - metadata
+  batch:
+    # 批量运行用例的并发度（同时执行的用例条数）。设为 1 即串行；调高会更快打满目标服务。
+    concurrency: ${MIRAGE_BATCH_CONCURRENCY:8}
+    # 批量执行任务队列容量，队列满时由请求线程自己跑（背压，不丢任务）
+    queue-capacity: ${MIRAGE_BATCH_QUEUE_CAPACITY:512}
 
 logging:
   level:

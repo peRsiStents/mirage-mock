@@ -28,23 +28,23 @@ public class JwtUtil {
     public String generate(Long userId, String username, boolean admin) {
         long now = System.currentTimeMillis();
         return Jwts.builder()
-                .setSubject(username)
-                .setId(String.valueOf(userId))
+                .subject(username)
+                .id(String.valueOf(userId))
                 .claim("uid", userId)
                 .claim("username", username)
                 .claim("admin", admin)
-                .setIssuedAt(new Date(now))
-                .setExpiration(new Date(now + ttlMs))
+                .issuedAt(new Date(now))
+                .expiration(new Date(now + ttlMs))
                 .signWith(key)
                 .compact();
     }
 
     public Claims parse(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(key)
+        return Jwts.parser()
+                .verifyWith(key)
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     private static byte[] normalize(String secret) {
