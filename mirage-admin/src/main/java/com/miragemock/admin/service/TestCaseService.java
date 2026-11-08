@@ -30,7 +30,10 @@ import com.miragemock.admin.security.ProjectAuthz;
 import com.miragemock.tcp.codec.MessageParser;
 import com.miragemock.tcp.codec.MessageParserRegistry;
 import com.miragemock.tcp.frame.FrameEncoder;
+import com.miragemock.tcp.frame.FrameReader;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -42,13 +45,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
@@ -58,14 +59,20 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 /**
  * 测试案例管理：CRUD + proxy 运行(RestTemplate 转发 + 断言求值 + 记录) + 运行历史。
  */
 @Service
+@Slf4j
 public class TestCaseService {
 
     private static final int HISTORY_LIMIT = 100;
+
+    /** TCP 用例读响应超时（毫秒）。按帧精确读取后一般不会触发。 */
+    private static final int TCP_READ_TIMEOUT_MS = 10000;
 
     private final TestCaseMapper caseMapper;
     private final TestRunLogMapper logMapper;
@@ -80,6 +87,8 @@ public class TestCaseService {
     private final MessageParserRegistry parserRegistry;
     private final TestTargetGuard targetGuard;
     private final ProjectAuthz authz;
+    /** 批量运行用的有界线程池（并发执行各条独立用例），由 AdminConfig 提供。 */
+    private final ExecutorService batchExecutor;
 
     @Autowired
     public TestCaseService(TestCaseMapper caseMapper, TestRunLogMapper logMapper, TestRunRecordMapper recordMapper,
@@ -88,7 +97,8 @@ public class TestCaseService {
                            RestTemplate restTemplate, ExpressionEvaluator evaluator,
                            SecretResolver secretResolver, SeqProvider seqProvider,
                            MessageParserRegistry parserRegistry, TestTargetGuard targetGuard,
-                           ProjectAuthz authz) {
+                           ProjectAuthz authz,
+                           @Qualifier("batchExecutor") ExecutorService batchExecutor) {
         this.caseMapper = caseMapper;
         this.logMapper = logMapper;
         this.recordMapper = recordMapper;
@@ -102,6 +112,7 @@ public class TestCaseService {
         this.parserRegistry = parserRegistry;
         this.targetGuard = targetGuard;
         this.authz = authz;
+        this.batchExecutor = batchExecutor;
     }
 
     // ============ CRUD ============
@@ -156,6 +167,8 @@ public class TestCaseService {
         if (patch.getProtocol() != null) exists.setProtocol(patch.getProtocol());
         if (patch.getTcpConfig() != null) exists.setTcpConfig(patch.getTcpConfig());
         if (patch.getTags() != null) exists.setTags(patch.getTags());
+        // 数据驱动配置：之前漏了这条，前端提交的新 dataSet 被静默丢弃（改不动数据驱动）
+        if (patch.getDataSet() != null) exists.setDataSet(patch.getDataSet());
         normalize(exists);
         caseMapper.updateById(exists);
         return exists;
@@ -187,6 +200,13 @@ public class TestCaseService {
     /**
      * 批量运行：同项目多用例，项目变量/环境变量只加载一次，逐条执行(proxy)+落历史，返回每条摘要与汇总。
      * 摘要不含完整响应体（大批量回传过大），需查详情走单条运行/历史。
+     *
+     * <p>各条用例彼此独立（HTTP 转发 / TCP 一问一答），串行时总耗时 = Σ 单条耗时，
+     * 选 50 条慢接口就得等好几分钟。故用有界线程池并发执行，并按入参顺序回填结果
+     * （前端表格顺序不随完成先后跳动）。
+     *
+     * <p><b>鉴权必须在调用线程完成</b>：{@link AuthContext} 是 ThreadLocal，
+     * 工作线程里取不到当前登录用户，若把「取用例 + 成员校验」放进工作线程会一律报无权限。
      */
     public BatchRunResult batchRun(List<Long> ids, Long projectId, Long envId) {
         BatchRunResult res = new BatchRunResult();
@@ -196,34 +216,92 @@ public class TestCaseService {
             return res;
         }
         Map<String, Object> baseVars;
+        String baseVarsError = null;
         try {
             baseVars = buildBaseVars(projectId, envId);
         } catch (Exception e) {
+            // 环境跨项目等上下文初始化失败：不能静默用空变量继续跑（结果会失真且掩盖错误）
             baseVars = new HashMap<>();
+            baseVarsError = rootMessage(e);
         }
         long t0 = System.currentTimeMillis();
-        int passed = 0;
+
+        int n = ids.size();
+        // 先在调用线程逐条取用例（内含成员鉴权），失败只影响该条，不影响其它条
+        List<Map<String, Object>> items = new ArrayList<>(n);
+        List<TestCase> cases = new ArrayList<>(n);
+        List<String> preErrors = new ArrayList<>(n);
         for (Long id : ids) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", id);
+            TestCase tc = null;
+            String preError = null;
             try {
-                TestCase tc = get(id); // 取全量 + requireMember
+                tc = get(id); // 取全量 + requireMember
                 item.put("name", tc.getName());
-                EvalContext ctx = newContext(projectId, new HashMap<>(baseVars));
-                RunResult rr = executeCase(tc, ctx);
-                writeLog(tc, "proxy", rr);
-                item.put("passed", rr.getPassed());
-                item.put("httpStatus", rr.getHttpStatus());
-                item.put("costMs", rr.getCostMs());
-                item.put("error", rr.getError());
-                if (Boolean.TRUE.equals(rr.getPassed())) {
-                    passed++;
+                // 用例必须属于本项目：否则会把 A 项目的用例放到 B 项目的环境下跑，
+                // 变量/环境变量全串了，结果既失真又可能泄露跨项目数据
+                if (projectId != null && tc.getProjectId() != null && !projectId.equals(tc.getProjectId())) {
+                    preError = "用例不属于当前项目";
                 }
             } catch (Exception e) {
-                item.put("passed", false);
-                item.put("error", rootMessage(e));
+                preError = rootMessage(e);
             }
+            items.add(item);
+            cases.add(tc);
+            preErrors.add(preError);
+        }
+
+        final Map<String, Object> finalBaseVars = baseVars;
+        List<Future<Void>> futures = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            final TestCase tc = cases.get(i);
+            final String preError = preErrors.get(i);
+            final Map<String, Object> item = items.get(i);
+            if (tc == null || preError != null) {
+                if (preError != null) {
+                    item.put("passed", false);
+                    item.put("error", preError);
+                }
+                continue;
+            }
+            if (baseVarsError != null) {
+                item.put("passed", false);
+                item.put("error", "上下文初始化失败: " + baseVarsError);
+                continue;
+            }
+            futures.add(batchExecutor.submit(() -> {
+                try {
+                    EvalContext ctx = newContext(projectId, new HashMap<>(finalBaseVars));
+                    RunResult rr = executeCase(tc, ctx);
+                    writeLog(tc, "proxy", rr);
+                    item.put("passed", rr.getPassed());
+                    item.put("httpStatus", rr.getHttpStatus());
+                    item.put("costMs", rr.getCostMs());
+                    item.put("error", rr.getError());
+                    item.put("warning", rr.getWarning());
+                } catch (Exception e) {
+                    item.put("passed", false);
+                    item.put("error", rootMessage(e));
+                }
+                return null;
+            }));
+        }
+        for (Future<Void> f : futures) {
+            try {
+                f.get();
+            } catch (Exception e) {
+                // 单条任务异常不应中断整批；该条的错误已在任务内捕获
+                log.debug("批量运行单条任务异常: {}", rootMessage(e));
+            }
+        }
+
+        int passed = 0;
+        for (Map<String, Object> item : items) {
             results.add(item);
+            if (Boolean.TRUE.equals(item.get("passed"))) {
+                passed++;
+            }
         }
         res.setTotal(results.size());
         res.setPassedCount(passed);
@@ -317,6 +395,9 @@ public class TestCaseService {
             d.put("error", rr.getError());
             d.put("body", truncate(rr.getBody()));
             d.put("assertions", rr.getAssertions());
+            // 记录查看：请求/返回报文一并入库，便于回看每行数据跑出来的现场
+            d.put("request", rr.getRequest());
+            d.put("response", rr.getResponse());
             detail.add(d);
         }
         res.setTotal(rows.size());
@@ -387,11 +468,22 @@ public class TestCaseService {
             rr.setError("用例配置有误: " + rootMessage(e));
             return;
         }
+        // GET/HEAD 不允许带请求体：HttpURLConnection 会抛 ProtocolException
+        // ("Cannot write to a URLConnection if using HTTP/1.1")，错误信息完全看不出
+        // 是用例配了 body。这里显式丢弃 body，并给出可读的提示。
+        if (reqBody.body != null && (HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method))) {
+            reqBody.body = null;
+            reqBody.contentType = null;
+            // 用 warning 而非 error：请求本身是成功的，不能因此把用例判为失败
+            rr.setWarning("提示：GET/HEAD 请求不携带请求体，已忽略用例中配置的 body");
+        }
         long t0 = System.currentTimeMillis();
         try {
             if (reqBody.contentType != null && !httpHeaders.containsKey("Content-Type")) {
                 httpHeaders.setContentType(reqBody.contentType);
             }
+            // 记录请求报文（在真正发出前抓取，含求值后的最终值）
+            rr.setRequest(describeHttpRequest(method, fullUrl, httpHeaders, reqBody));
             RequestEntity<Object> req = new RequestEntity<>(reqBody.body, httpHeaders, method, new URI(fullUrl));
             ResponseEntity<String> resp = restTemplate.exchange(req, String.class);
             rr.setHttpStatus(resp.getStatusCodeValue());
@@ -401,21 +493,77 @@ public class TestCaseService {
             rr.setError("请求失败: " + rootMessage(e));
         }
         rr.setCostMs(System.currentTimeMillis() - t0);
+        rr.setResponse(describeResponse(rr));
     }
 
-    /** TCP 执行：按 tcp_config 加帧发送、短连接读裸 body、按报文格式解析为字段 JSON 赋给 body。 */
+    /**
+     * 描述 HTTP 请求报文：方法 + URL + 请求头 + 请求体。
+     * 用于「记录查看」——回看某次运行实际发出的请求。
+     */
+    private Map<String, Object> describeHttpRequest(HttpMethod method, String url,
+                                                    HttpHeaders headers, RequestBody body) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("protocol", "HTTP");
+        m.put("method", method == null ? "" : method.name());
+        m.put("url", url);
+        m.put("headers", flatten(headers));
+        m.put("body", describeBody(body == null ? null : body.body));
+        return m;
+    }
+
+    /** 请求体可读化：字符串原样；二进制给 hex 预览；表单等结构给 JSON。 */
+    private String describeBody(Object body) {
+        if (body == null) {
+            return null;
+        }
+        if (body instanceof String) {
+            return (String) body;
+        }
+        if (body instanceof byte[]) {
+            byte[] b = (byte[]) body;
+            String hex = com.miragemock.dsl.crypto.Codec.hex(b);
+            if (hex.length() > 512) {
+                hex = hex.substring(0, 512) + "...(共 " + b.length + " 字节)";
+            }
+            return "[二进制 " + b.length + " 字节] " + hex;
+        }
+        try {
+            return JsonUtils.toJson(body);
+        } catch (Exception e) {
+            return String.valueOf(body);
+        }
+    }
+
+    /** 返回报文：响应头 + 响应体 */
+    private Map<String, Object> describeResponse(RunResult rr) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("headers", rr.getHeaders() == null ? new LinkedHashMap<String, Object>() : rr.getHeaders());
+        m.put("body", rr.getBody());
+        return m;
+    }
+
+    /**
+     * TCP 执行：按 tcp_config 加帧发送 → 按帧配置精确读取一帧 → 按报文格式解析为字段 JSON。
+     *
+     * <p>要点：
+     * <ul>
+     *   <li>读取按 {@code frame_config} 精确取一帧（{@link FrameReader}），
+     *       不再「读到 EOF/超时」——否则长连接监听器每次都要白等满 SO_TIMEOUT。</li>
+     *   <li>目标主机先经 SSRF 策略解析并<b>校验</b>，再用校验通过的 IP 建立连接，
+     *       消除「校验时解析到公网、连接时解析到内网」的 DNS rebinding 窗口。</li>
+     *   <li>端口做范围校验，避免 IllegalArgumentException 直接冒泡成无意义错误。</li>
+     * </ul>
+     */
     private void executeTcp(TestCase tc, EvalContext ctx, RunResult rr) {
         long t0 = System.currentTimeMillis();
         try {
             Map<String, Object> tcpCfg = parseTcpConfig(tc.getTcpConfig());
-            String frameConfig = str(tcpCfg.get("frameConfig"));
+            String frameConfig = normalizeFrameConfig(tcpCfg.get("frameConfig"));
             String messageFormat = str(tcpCfg.get("messageFormat"));
             if (messageFormat.isEmpty()) {
                 messageFormat = "json";
             }
-            Object fmtObj = tcpCfg.get("formatConfig");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> formatConfig = fmtObj instanceof Map ? (Map<String, Object>) fmtObj : null;
+            Map<String, Object> formatConfig = normalizeFormatConfig(tcpCfg.get("formatConfig"));
 
             String target = eval(tc.getUrl() == null ? "" : tc.getUrl().trim(), ctx);
             int colon = target.lastIndexOf(':');
@@ -423,11 +571,12 @@ public class TestCaseService {
                 throw new IllegalArgumentException("目标应为 host:port：" + target);
             }
             String host = target.substring(0, colon).trim();
-            int port = Integer.parseInt(target.substring(colon + 1).trim());
+            int port = parsePort(target.substring(colon + 1).trim(), target);
             if (host.isEmpty()) {
                 host = "localhost";
             }
-            targetGuard.assertAllowed(host);
+            // 解析并校验（返回已校验的 IP，连接时直接用它，规避 DNS rebinding）
+            InetAddress addr = targetGuard.resolveAllowed(host);
 
             Map<String, Object> fields = JsonUtils.parseMap(eval(tc.getBody() == null ? "{}" : tc.getBody(), ctx));
             if (fields == null) {
@@ -436,7 +585,9 @@ public class TestCaseService {
             MessageParser parser = parserRegistry.resolve(messageFormat);
             byte[] payload = parser.encode(fields, formatConfig);
             byte[] framed = FrameEncoder.encode(payload, frameConfig);
-            byte[] resp = tcpRoundTrip(host, port, framed);
+            // 记录请求报文（字段文本 + 加帧后的线路字节）
+            rr.setRequest(describeTcpRequest(host, port, frameConfig, messageFormat, fields, framed));
+            byte[] resp = tcpRoundTrip(addr, port, framed, frameConfig);
             // 响应去帧：剥离 length_field 长度头/尾部分隔符，避免帧头字节混进解析内容
             // （否则报文前面会多出帧头字节，如长度头 0x74 被当成正文里的 't'）
             byte[] respPayload = FrameEncoder.strip(resp, frameConfig);
@@ -447,47 +598,136 @@ public class TestCaseService {
             rr.setError("TCP 请求失败: " + rootMessage(e));
         }
         rr.setCostMs(System.currentTimeMillis() - t0);
+        rr.setResponse(describeResponse(rr));
     }
 
-    /** 短连接：发完 shutdown 输出（触发 close_end/短连接回写），读响应至 EOF。 */
-    private byte[] tcpRoundTrip(String host, int port, byte[] request) throws IOException {
+    /**
+     * 描述 TCP 请求报文：目标 + 帧配置 + 字段文本 + 加帧后的线路字节（hex）。
+     * raw 是真正发到线上的字节，能直观看出长度头/分隔符/定长补位。
+     */
+    private Map<String, Object> describeTcpRequest(String host, int port, String frameConfig,
+                                                   String messageFormat, Map<String, Object> fields,
+                                                   byte[] framed) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("protocol", "TCP");
+        m.put("target", host + ":" + port);
+        m.put("frame", frameConfig);
+        m.put("messageFormat", messageFormat);
+        m.put("body", fields == null || fields.isEmpty() ? null : JsonUtils.toJson(fields));
+        m.put("raw", com.miragemock.dsl.crypto.Codec.hex(framed));
+        m.put("rawLength", framed == null ? 0 : framed.length);
+        return m;
+    }
+
+    /**
+     * 端口解析与范围校验（1..65535）。
+     *
+     * <p>原先直接 {@code Integer.parseInt}：非法值会抛裸 NumberFormatException，
+     * 端口越界（如 70000）要等到 connect 阶段才报错，错误信息难以定位。
+     */
+    private int parsePort(String raw, String target) {
+        int port;
+        try {
+            port = Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("端口不是合法数字：" + target);
+        }
+        if (port < 1 || port > 65535) {
+            throw new IllegalArgumentException("端口超出合法范围(1-65535)：" + port);
+        }
+        return port;
+    }
+
+    /**
+     * frameConfig 归一化：兼容「JSON 字符串」与「嵌套对象」两种写法。
+     *
+     * <p>UI 的 tcp_config 模板写的是嵌套对象
+     * （{"frameConfig":{"type":"length_field",...}}），
+     * 而「从监听器填充」写入的是 JSON 字符串
+     * （{"frameConfig":"{\"type\":\"length_field\",...}"}）。
+     * 原实现用 {@code String.valueOf(map)} 取值，嵌套对象会变成
+     * {@code {type=length_field, lenBytes=4}} 这种非 JSON 文本 → 帧配置被静默忽略。
+     */
+    private String normalizeFrameConfig(Object v) {
+        if (v == null) {
+            return "";
+        }
+        if (v instanceof Map) {
+            return JsonUtils.toJson(v);
+        }
+        String s = v.toString().trim();
+        if (s.isEmpty() || s.equals("{}")) {
+            return "";
+        }
+        return s;
+    }
+
+    /** formatConfig 归一化：JSON 字符串 → Map；已是 Map 则直接用。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> normalizeFormatConfig(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof Map) {
+            return (Map<String, Object>) v;
+        }
+        String s = v.toString().trim();
+        if (s.isEmpty()) {
+            return null;
+        }
+        try {
+            return JsonUtils.parseMap(s);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("formatConfig 不是合法 JSON 对象");
+        }
+    }
+
+    /**
+     * TCP 一问一答：发完 shutdown 输出（触发 close_end/短连接回写），
+     * 按帧配置精确读取一帧响应。
+     *
+     * @param addr        已通过 SSRF 校验的目标 IP（直接用它连接，避免二次解析）
+     * @param frameConfig 帧配置 JSON 文本（用于精确读取一帧）
+     */
+    private byte[] tcpRoundTrip(InetAddress addr, int port, byte[] request, String frameConfig) throws IOException {
         try (Socket sock = new Socket()) {
-            sock.connect(new InetSocketAddress(host, port), 5000);
-            sock.setSoTimeout(10000);
+            sock.connect(new InetSocketAddress(addr, port), 5000);
+            sock.setSoTimeout(TCP_READ_TIMEOUT_MS);
             OutputStream out = sock.getOutputStream();
             out.write(request);
             out.flush();
             sock.shutdownOutput();
-            return readUntilEnd(sock.getInputStream());
+            return FrameReader.readFrame(sock, frameConfig, TCP_READ_TIMEOUT_MS);
         }
-    }
-
-    private byte[] readUntilEnd(InputStream in) throws IOException {
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        byte[] tmp = new byte[4096];
-        int n;
-        try {
-            while ((n = in.read(tmp)) != -1) {
-                buf.write(tmp, 0, n);
-            }
-        } catch (SocketTimeoutException e) {
-            // 长连接场景：响应已到、对端未关连接，SO_TIMEOUT 视为读完成
-        }
-        return buf.toByteArray();
     }
 
     private void evalAssertions(RunResult rr, TestCase tc, EvalContext ctx) {
         boolean allPassed = true;
+        boolean tcp = "TCP".equalsIgnoreCase(tc.getProtocol());
         for (Map<String, Object> a : parseList(tc.getAssertions())) {
             a.put("expected", eval(str(a.get("expected")), ctx));
             Map<String, Object> r = evalAssertion(a,
                     rr.getHttpStatus() == null ? 0 : rr.getHttpStatus(), rr.getHeaders(), rr.getBody(), rr.getCostMs());
+            // TCP 没有响应头概念：header / headerExists 断言在 TCP 用例上恒为「不通过」，
+            // 用户只能看到一条永远失败的断言。此类断言标记为「跳过」，不计入整体结论。
+            if (tcp && isTcpInapplicableAssertion(str(a.get("type")))) {
+                r.put("passed", Boolean.TRUE);
+                r.put("skipped", Boolean.TRUE);
+                r.put("message", "TCP 协议无响应头/状态码，该断言已跳过");
+            }
             rr.getAssertions().add(r);
             if (!Boolean.TRUE.equals(r.get("passed"))) {
                 allPassed = false;
             }
         }
         rr.setPassed(allPassed && rr.getError() == null);
+    }
+
+    /** TCP 用例上不适用的断言类型：响应头相关 + HTTP 状态码。 */
+    private boolean isTcpInapplicableAssertion(String type) {
+        return "header".equalsIgnoreCase(type)
+                || "headerExists".equalsIgnoreCase(type)
+                || "status".equalsIgnoreCase(type);
     }
 
     /** tcp_config JSON → {frameConfig, messageFormat, formatConfig}。 */
@@ -540,10 +780,35 @@ public class TestCaseService {
     }
 
     public List<TestRunLog> runs(Long caseId) {
+        // 鉴权：运行历史按 caseId 直查，必须先校验当前用户是该用例所属项目的成员
+        get(caseId);
         return logMapper.selectList(new LambdaQueryWrapper<TestRunLog>()
                 .eq(TestRunLog::getCaseId, caseId)
                 .orderByDesc(TestRunLog::getCreateTime)
                 .last("LIMIT " + HISTORY_LIMIT));
+    }
+
+    /**
+     * 单条运行记录详情（含请求/返回报文）。
+     *
+     * <p>报文三列在实体上标了 {@code select = false}（列表不查，避免 100 条大报文把响应撑爆），
+     * 这里显式 select 出来。
+     */
+    public TestRunLog runDetail(Long caseId, Long runId) {
+        // 鉴权：同 runs()
+        get(caseId);
+        TestRunLog log = logMapper.selectOne(new LambdaQueryWrapper<TestRunLog>()
+                .select(TestRunLog::getId, TestRunLog::getProjectId, TestRunLog::getCaseId,
+                        TestRunLog::getMode, TestRunLog::getHttpStatus, TestRunLog::getCostMs,
+                        TestRunLog::getPassed, TestRunLog::getAssertionResult, TestRunLog::getError,
+                        TestRunLog::getRequestInfo, TestRunLog::getResponseBody, TestRunLog::getResponseHeaders,
+                        TestRunLog::getCreateTime, TestRunLog::getUpdateTime)
+                .eq(TestRunLog::getId, runId)
+                .eq(TestRunLog::getCaseId, caseId));
+        if (log == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "运行记录不存在: " + runId);
+        }
+        return log;
     }
 
     // ============ 断言求值 ============
@@ -948,6 +1213,12 @@ public class TestCaseService {
         if (envId != null) {
             TestEnvironment env = environmentMapper.selectById(envId);
             if (env != null) {
+                // 环境必须属于当前项目：否则可用 A 项目的 envId 读取 B 项目的 baseUrl/变量
+                // （跨项目 IDOR）。不属于时直接忽略该环境。
+                if (projectId != null && env.getProjectId() != null
+                        && !projectId.equals(env.getProjectId())) {
+                    throw new BizException(ResultCode.FORBIDDEN, "环境不属于当前项目");
+                }
                 if (env.getBaseUrl() != null && !env.getBaseUrl().isEmpty()) {
                     vars.put("__base_url", env.getBaseUrl());
                 }
@@ -1065,7 +1336,30 @@ public class TestCaseService {
         log.setPassed(Boolean.TRUE.equals(rr.getPassed()) ? Constants.STATUS_ENABLED : Constants.STATUS_DISABLED);
         log.setAssertionResult(JsonUtils.toJson(rr.getAssertions()));
         log.setError(rr.getError());
+        // 记录查看：请求/返回报文入库（截断防超大报文把库撑爆）
+        log.setRequestInfo(rr.getRequest() == null ? null : JsonUtils.toJson(truncateValues(rr.getRequest())));
+        log.setResponseBody(truncate(rr.getBody()));
+        log.setResponseHeaders(rr.getHeaders() == null ? null : JsonUtils.toJson(rr.getHeaders()));
         logMapper.insert(log);
+    }
+
+    /**
+     * 逐个字段截断请求报文里的长文本（body / raw）。
+     *
+     * <p><b>不能对序列化后的 JSON 整体截断</b>：那样会从中间切断，
+     * 存进去的是非法 JSON，前端解析失败 → 整条请求报文都看不到（比截断更糟）。
+     * 这里保持外层 JSON 完整，只把超长字符串值裁掉。
+     */
+    private Map<String, Object> truncateValues(Map<String, Object> src) {
+        if (src == null || src.isEmpty()) {
+            return src;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : src.entrySet()) {
+            Object v = e.getValue();
+            out.put(e.getKey(), v instanceof String ? truncate((String) v) : v);
+        }
+        return out;
     }
 
     // ============ 工具 ============

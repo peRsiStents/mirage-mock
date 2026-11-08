@@ -39,7 +39,7 @@
       <el-pagination style="margin-top:12px; justify-content:flex-end"
         v-model:current-page="page.current" v-model:page-size="page.size" :total="page.total"
         :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next"
-        @current-change="load" @size-change="load" />
+        @current-change="load" @size-change="onSizeChange" />
     </el-card>
 
     <el-dialog v-model="detailVisible" title="报告详情" width="880px" top="3vh">
@@ -90,6 +90,7 @@ import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { createGuard } from '../api/client'
 import { useProjectStore } from '../store/project'
 import { copyText } from '../utils/clipboard'
 import ResponseBody from '../components/ResponseBody.vue'
@@ -103,6 +104,9 @@ const filters = reactive({ type: '', passed: null, from: null, to: null })
 const detailVisible = ref(false)
 const detail = ref(null)
 
+// 竞态防护：切项目/快速翻页时旧响应不回写
+const fetchRecords = createGuard((params) => api.records.query(proj.id, params))
+
 const stepView = ref('fail')
 const openSteps = ref([])
 
@@ -110,6 +114,8 @@ function rowClass({ row }) { return row.passed === 1 ? '' : 'row-fail' }
 function isFail(s) { return !s.skipped && !s.passed }
 function resetAndLoad() { page.current = 1; load() }
 function resetFilters() { Object.assign(filters, { type: '', passed: null, from: null, to: null }); page.current = 1; load() }
+// 改每页条数时回到第一页，避免落在超出范围的大页码上拿空数据
+function onSizeChange() { page.current = 1; load() }
 
 async function load() {
   if (!proj.id) return

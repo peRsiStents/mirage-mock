@@ -95,10 +95,16 @@ public class TestCaseController {
         return Result.ok();
     }
 
-    /** 运行历史（最近 100 条） */
+    /** 运行历史（最近 100 条，不含报文正文） */
     @GetMapping("/testcases/{id}/runs")
     public Result<List<TestRunLog>> runs(@PathVariable Long id) {
         return Result.ok(service.runs(id));
+    }
+
+    /** 单条运行记录详情（含请求/返回报文，用于「记录查看」） */
+    @GetMapping("/testcases/{id}/runs/{runId}")
+    public Result<TestRunLog> runDetail(@PathVariable Long id, @PathVariable Long runId) {
+        return Result.ok(service.runDetail(id, runId));
     }
 
     // ============ 测试变量/常量（项目级） ============
