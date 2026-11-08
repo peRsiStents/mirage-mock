@@ -86,6 +86,20 @@ sudo journalctl -u mirage-mock -n 200   # 查日志
 
 ## 注意
 
-- 首次启动 Flyway 自动执行 `V1__init.sql`、`V2__tcp_listener.sql` 建表并写入 `admin/admin123` 与 demo 数据。
+- 首次启动 Flyway 自动执行 `V1__init.sql` 起的全部迁移建表并写入 `admin/admin123` 与 demo 数据；**登录后请立即修改 admin 密码**（Users 页面）。
 - `MIRAGE_JWT_SECRET` / `MIRAGE_MASTER_KEY` 一旦设定，**不要随意改**（改 JWT 密钥会使所有已发 token 失效；改 MASTER 密钥会导致历史密钥私钥无法解密）。正式上线前一次配好。
 - 规则/接口改动是内存热生效，无需重启；只有改 `mirage-mock.env` 或升级 jar 才需 restart。
+- 日志以 append 方式写入 `/var/log/mirage-mock/`，建议配置 logrotate 防止无限增长（示例）：
+
+  ```
+  # /etc/logrotate.d/mirage-mock
+  /var/log/mirage-mock/*.log {
+      daily
+      rotate 14
+      compress
+      missingok
+      notifempty
+      copytruncate
+  }
+  ```
+

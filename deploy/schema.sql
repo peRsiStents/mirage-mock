@@ -35,7 +35,8 @@ CREATE TABLE project_member (
     project_id  BIGINT      NOT NULL,
     user_id     BIGINT      NOT NULL,
     member_role VARCHAR(16),
-    create_time DATETIME
+    create_time DATETIME,
+    CONSTRAINT uk_member_project_user UNIQUE (project_id, user_id)
 );
 
 CREATE TABLE api_interface (
@@ -80,7 +81,8 @@ CREATE TABLE secret_key (
     private_key TEXT,
     iv_value    VARCHAR(128),
     create_time DATETIME,
-    update_time DATETIME
+    update_time DATETIME,
+    CONSTRAINT uk_secret_project_alias UNIQUE (project_id, alias)
 );
 
 CREATE TABLE mock_request_log (
@@ -110,6 +112,7 @@ CREATE TABLE mock_sequence (
 
 CREATE INDEX idx_log_project_time ON mock_request_log (project_id, create_time);
 CREATE INDEX idx_interface_project ON api_interface (project_id);
+CREATE INDEX idx_interface_route ON api_interface (http_method, http_path);
 CREATE INDEX idx_rule_interface ON mock_rule (interface_id);
 CREATE INDEX idx_secret_project_alias ON secret_key (project_id, alias);
 
@@ -190,6 +193,10 @@ CREATE TABLE test_run_log (
     passed           TINYINT,
     assertion_result TEXT,
     error            TEXT,
+    -- 记录查看：请求报文 JSON / 返回报文体 / 返回报文头 JSON
+    request_info     TEXT,
+    response_body    TEXT,
+    response_headers TEXT,
     create_time      DATETIME,
     update_time      DATETIME
 );
@@ -205,7 +212,8 @@ CREATE TABLE test_variable (
     remark      VARCHAR(256),
     status      TINYINT      DEFAULT 1,
     create_time DATETIME,
-    update_time DATETIME
+    update_time DATETIME,
+    CONSTRAINT uk_testvar_project_name UNIQUE (project_id, name)
 );
 CREATE INDEX idx_testvar_project ON test_variable (project_id);
 

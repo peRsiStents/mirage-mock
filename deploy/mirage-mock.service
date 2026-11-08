@@ -11,13 +11,25 @@ User=mirage
 Group=mirage
 WorkingDirectory=/opt/mirage-mock
 EnvironmentFile=/opt/mirage-mock/mirage-mock.env
-# 堆内存按机器调整；-Xmx512m 一般够用
-ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/mirage-mock/mirage-mock.jar
+# 堆内存按机器调整；-Xmx512m 一般够用（TCP 大报文/高并发场景建议 1g）
+ExecStart=/usr/bin/java -Xms256m -Xmx1g -jar /opt/mirage-mock/mirage-mock.jar
 SuccessExitStatus=143
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:/var/log/mirage-mock/app.log
 StandardError=append:/var/log/mirage-mock/app.err.log
+
+# ---- 资源限制（防止单服务耗尽整机；按机器调整）----
+MemoryMax=1500M
+LimitNOFILE=65536
+
+# ---- 基础安全加固 ----
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+# 允许写入的目录：应用日志
+ReadWritePaths=/var/log/mirage-mock
 
 [Install]
 WantedBy=multi-user.target
