@@ -476,8 +476,12 @@ public class ToolService {
 
     /** 文本（UTF-8）摘要，返回小写 Hex。 */
     private String digestHex(String text, String algo) {
+        // 算法名校验必须在 try 之外：jceName 抛的是 IllegalArgumentException（入参非法），
+        // 若被下面的 catch(Exception) 吞掉会改抛 IllegalStateException，调用方无法区分
+        // 「算法不支持」和「摘要计算失败」。
+        String jce = jceName(algo);
         try {
-            MessageDigest md = MessageDigest.getInstance(jceName(algo));
+            MessageDigest md = MessageDigest.getInstance(jce);
             return Codec.hex(md.digest(Codec.utf8(text)));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("摘要算法不可用：" + algo, e);
