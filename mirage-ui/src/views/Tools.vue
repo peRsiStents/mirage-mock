@@ -7,7 +7,7 @@
             <span>工具市场 · 测试常用小工具</span>
             <span class="hint">格式化 / 国密(RSA) 加解密签名；可直接粘贴密钥，或在 SM2/SM4/RSA 标签「引用密钥」选项目密钥（私钥服务端解析、不回前端）</span>
           </div>
-          <el-button size="small" @click="copyCurrentOut">复制结果</el-button>
+          <el-button v-if="tab !== 'fileb64'" size="small" @click="copyCurrentOut">复制结果</el-button>
         </div>
       </template>
 
@@ -154,11 +154,55 @@
           </template>
         </el-tab-pane>
 
+        <!-- ===================== 测试助手 ===================== -->
+        <el-tab-pane label="测试助手" name="helper">
+          <el-tabs v-model="helperTab" type="border">
+            <el-tab-pane label="MD5 摘要" name="digest">
+              <DigestTool />
+            </el-tab-pane>
+            <el-tab-pane label="正则" name="regex">
+              <RegexTool />
+            </el-tab-pane>
+            <el-tab-pane label="JSONPath" name="jsonpath">
+              <JsonPathTool />
+            </el-tab-pane>
+            <el-tab-pane label="Cron" name="cron">
+              <CronTool />
+            </el-tab-pane>
+            <el-tab-pane label="随机数据" name="random">
+              <RandomTool />
+            </el-tab-pane>
+            <el-tab-pane label="文本对比" name="diff">
+              <DiffTool />
+            </el-tab-pane>
+            <el-tab-pane label="HMAC 签名" name="hmac">
+              <HmacTool />
+            </el-tab-pane>
+            <el-tab-pane label="字符集" name="charset">
+              <CharsetTool />
+            </el-tab-pane>
+            <el-tab-pane label="CSV⇄JSON" name="csv">
+              <CsvTool />
+            </el-tab-pane>
+            <el-tab-pane label="URL" name="url">
+              <UrlTool />
+            </el-tab-pane>
+            <el-tab-pane label="字段风格" name="case">
+              <CaseTool />
+            </el-tab-pane>
+          </el-tabs>
+        </el-tab-pane>
+
+        <!-- ===================== 文件/图片 ⇄ Base64 ===================== -->
+        <el-tab-pane label="文件/图片⇄Base64" name="fileb64">
+          <FileBase64Tool />
+        </el-tab-pane>
+
         <!-- ===================== SM3 ===================== -->
         <el-tab-pane label="SM3 摘要" name="sm3">
           <div class="bar">
             <span class="label">输出：</span>
-            <el-radio-group v-model="sm3Out" size="small">
+            <el-radio-group v-model="sm3OutEnc" size="small">
               <el-radio-button label="hex">Hex</el-radio-button>
               <el-radio-button label="base64">Base64</el-radio-button>
             </el-radio-group>
@@ -318,10 +362,24 @@ import { ref, computed, watch, onMounted, watchEffect } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { copyText } from '../utils/clipboard'
+import FileBase64Tool from '../components/FileBase64Tool.vue'
+import DigestTool from '../components/tools/DigestTool.vue'
+import RegexTool from '../components/tools/RegexTool.vue'
+import JsonPathTool from '../components/tools/JsonPathTool.vue'
+import CronTool from '../components/tools/CronTool.vue'
+import RandomTool from '../components/tools/RandomTool.vue'
+import DiffTool from '../components/tools/DiffTool.vue'
+import HmacTool from '../components/tools/HmacTool.vue'
+import CharsetTool from '../components/tools/CharsetTool.vue'
+import CsvTool from '../components/tools/CsvTool.vue'
+import UrlTool from '../components/tools/UrlTool.vue'
+import CaseTool from '../components/tools/CaseTool.vue'
 import { useProjectStore } from '../store/project'
 
 const proj = useProjectStore()
 const tab = ref('json')
+// 「测试助手」子标签（MD5/正则/JSONPath/Cron/随机数据/文本对比）
+const helperTab = ref('digest')
 const running = ref(false)
 
 // 引用项目密钥（免粘贴）：SM2/RSA 取公私钥，SM4 取对称密钥+IV；私钥在服务端解析、不回前端

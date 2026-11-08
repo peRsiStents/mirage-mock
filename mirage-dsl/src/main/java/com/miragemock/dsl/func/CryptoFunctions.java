@@ -22,19 +22,21 @@ public final class CryptoFunctions {
     public static List<MockFunction> all() {
         return Arrays.asList(
                 MockFns.fn("sm4_encrypt", (a, c) -> {
-                    KeyMaterial k = requireKey(c, FuncArgs.asString(a, 1, ""));
+                    String alias = FuncArgs.asString(a, 1, "");
+                    KeyMaterial k = requireKey(c, alias);
                     String[] opt = opts(a, 2);
                     byte[] out = "CBC".equals(opt[0])
-                            ? SmCrypto.sm4CbcEncrypt(k.getPrivateKey(), ivOf(k), Codec.utf8(FuncArgs.asString(a, 0, "")))
+                            ? SmCrypto.sm4CbcEncrypt(k.getPrivateKey(), ivOf(k, alias), Codec.utf8(FuncArgs.asString(a, 0, "")))
                             : SmCrypto.sm4EcbEncrypt(k.getPrivateKey(), Codec.utf8(FuncArgs.asString(a, 0, "")));
                     return encode(out, opt[1]);
                 }),
                 MockFns.fn("sm4_decrypt", (a, c) -> {
-                    KeyMaterial k = requireKey(c, FuncArgs.asString(a, 1, ""));
+                    String alias = FuncArgs.asString(a, 1, "");
+                    KeyMaterial k = requireKey(c, alias);
                     String[] opt = opts(a, 2);
                     byte[] cipher = decode(FuncArgs.asString(a, 0, ""), opt[1]);
                     byte[] out = "CBC".equals(opt[0])
-                            ? SmCrypto.sm4CbcDecrypt(k.getPrivateKey(), ivOf(k), cipher)
+                            ? SmCrypto.sm4CbcDecrypt(k.getPrivateKey(), ivOf(k, alias), cipher)
                             : SmCrypto.sm4EcbDecrypt(k.getPrivateKey(), cipher);
                     return Codec.utf8(out);
                 }),
@@ -65,19 +67,21 @@ public final class CryptoFunctions {
                 }),
 
                 MockFns.fn("aes_encrypt", (a, c) -> {
-                    KeyMaterial k = requireKey(c, FuncArgs.asString(a, 1, ""));
+                    String alias = FuncArgs.asString(a, 1, "");
+                    KeyMaterial k = requireKey(c, alias);
                     String[] opt = opts(a, 2);
                     byte[] out = "CBC".equals(opt[0])
-                            ? ClassicCrypto.aesCbcEncrypt(k.getPrivateKey(), ivOf(k), Codec.utf8(FuncArgs.asString(a, 0, "")))
+                            ? ClassicCrypto.aesCbcEncrypt(k.getPrivateKey(), ivOf(k, alias), Codec.utf8(FuncArgs.asString(a, 0, "")))
                             : ClassicCrypto.aesEcbEncrypt(k.getPrivateKey(), Codec.utf8(FuncArgs.asString(a, 0, "")));
                     return encode(out, opt[1]);
                 }),
                 MockFns.fn("aes_decrypt", (a, c) -> {
-                    KeyMaterial k = requireKey(c, FuncArgs.asString(a, 1, ""));
+                    String alias = FuncArgs.asString(a, 1, "");
+                    KeyMaterial k = requireKey(c, alias);
                     String[] opt = opts(a, 2);
                     byte[] cipher = decode(FuncArgs.asString(a, 0, ""), opt[1]);
                     byte[] out = "CBC".equals(opt[0])
-                            ? ClassicCrypto.aesCbcDecrypt(k.getPrivateKey(), ivOf(k), cipher)
+                            ? ClassicCrypto.aesCbcDecrypt(k.getPrivateKey(), ivOf(k, alias), cipher)
                             : ClassicCrypto.aesEcbDecrypt(k.getPrivateKey(), cipher);
                     return Codec.utf8(out);
                 }),
@@ -106,9 +110,9 @@ public final class CryptoFunctions {
         return k;
     }
 
-    private static byte[] ivOf(KeyMaterial k) {
+    private static byte[] ivOf(KeyMaterial k, String alias) {
         if (k.getIv() == null) {
-            throw new ExprException("CBC 模式需要 IV，但密钥 " + " 未配置 iv_value");
+            throw new ExprException("CBC 模式需要 IV，但密钥 '" + alias + "' 未配置 iv_value");
         }
         return k.getIv();
     }

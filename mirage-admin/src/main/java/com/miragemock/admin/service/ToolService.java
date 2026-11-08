@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miragemock.dsl.crypto.ClassicCrypto;
 import com.miragemock.dsl.crypto.Codec;
 import com.miragemock.dsl.crypto.SmCrypto;
+import com.miragemock.common.util.JsonUtils;
 import org.springframework.stereotype.Service;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
@@ -21,12 +22,24 @@ import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.UnmappableCharacterException;
+import java.security.InvalidKeyException;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -445,20 +458,332 @@ public class ToolService {
     }
 
     public String hash(String text, String algo) {
-        String a = algo == null ? "MD5" : algo.toUpperCase(Locale.ROOT);
-        String jce;
+        return digestHex(nullToEmpty(text), algo);
+    }
+
+    /** 摘要算法名 → JCE 名。 */
+    private String jceName(String algo) {
+        String a = algo == null || algo.trim().isEmpty() ? "MD5" : algo.trim().toUpperCase(Locale.ROOT);
         switch (a) {
-            case "MD5": jce = "MD5"; break;
-            case "SHA1": jce = "SHA-1"; break;
-            case "SHA256": jce = "SHA-256"; break;
-            case "SHA512": jce = "SHA-512"; break;
-            default: throw new IllegalArgumentException("不支持的算法：" + a + "（支持 MD5/SHA1/SHA256/SHA512）");
+            case "MD5": return "MD5";
+            case "SHA1": return "SHA-1";
+            case "SHA256": return "SHA-256";
+            case "SHA384": return "SHA-384";
+            case "SHA512": return "SHA-512";
+            default: throw new IllegalArgumentException("不支持的算法：" + a + "（支持 MD5/SHA1/SHA256/SHA384/SHA512）");
         }
+    }
+
+    /** 文本（UTF-8）摘要，返回小写 Hex。 */
+    private String digestHex(String text, String algo) {
         try {
-            MessageDigest md = MessageDigest.getInstance(jce);
-            return Codec.hex(md.digest(Codec.utf8(nullToEmpty(text))));
+            MessageDigest md = MessageDigest.getInstance(jceName(algo));
+            return Codec.hex(md.digest(Codec.utf8(text)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("摘要算法不可用：" + algo, e);
         } catch (Exception e) {
             throw new IllegalStateException("摘要计算失败：" + rootMessage(e), e);
+        }
+    }
+
+    /** 摘要入参上限（解码后字节数）：Base64 文本约为其 3/4，先按长度粗判，避免先解出巨量内存。 */
+    private static final int DIGEST_MAX_BYTES = 20 * 1024 * 1024;
+
+    /**
+     * 摘要（MD5/SHA 系列）：文本或二进制文件内容。
+     *
+     * <p>文件由前端读成 Base64 传上来（{@code contentB64}）——浏览器没有 MD5 的原生实现，
+     * 而 {@code crypto.subtle} 既不支持 MD5、又在 http 访问（非安全上下文）下不可用，
+     * 所以文件摘要只能落到服务端算。
+     *
+     * @param text      文本内容（UTF-8），与 contentB64 二选一
+     * @param contentB64 文件内容的 Base64（与 text 二选一）
+     * @param algos     算法列表（可多个）；为空则用 {@code algo}
+     * @param algo      单算法（algos 为空时用）
+     * @param upper     Hex 是否大写
+     * @return {size: 原始字节数, fromFile: 是否文件, results: {ALGO: {hex, base64}}}
+     */
+    public Map<String, Object> digest(String text, String contentB64, List<String> algos,
+                                      String algo, boolean upper) {
+        byte[] raw;
+        boolean fromFile;
+        if (contentB64 != null && !contentB64.trim().isEmpty()) {
+            String b64 = contentB64.replaceAll("\\s", "");
+            // 先按长度粗判上限，避免直接解出一个几百 MB 的数组
+            if (b64.length() / 4 * 3 > DIGEST_MAX_BYTES) {
+                throw new IllegalArgumentException("文件过大：摘要只支持 " + (DIGEST_MAX_BYTES / 1024 / 1024) + " MB 以内");
+            }
+            try {
+                raw = Base64.getDecoder().decode(b64);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("文件内容不是合法 Base64：" + rootMessage(e));
+            }
+            fromFile = true;
+        } else {
+            raw = Codec.utf8(nullToEmpty(text));
+            fromFile = false;
+        }
+        List<String> list = (algos == null || algos.isEmpty())
+                ? java.util.Collections.singletonList(algo == null ? "MD5" : algo)
+                : algos;
+        Map<String, Object> results = new LinkedHashMap<>();
+        for (String a : list) {
+            if (a == null || a.trim().isEmpty()) {
+                continue;
+            }
+            String name = a.trim().toUpperCase(Locale.ROOT);
+            try {
+                MessageDigest md = MessageDigest.getInstance(jceName(name));
+                byte[] d = md.digest(raw);
+                String hex = Codec.hex(d);
+                Map<String, Object> one = new LinkedHashMap<>();
+                one.put("hex", upper ? hex.toUpperCase(Locale.ROOT) : hex);
+                one.put("base64", Base64.getEncoder().encodeToString(d));
+                results.put(name, one);
+            } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException("摘要算法不可用：" + name, e);
+            }
+        }
+        if (results.isEmpty()) {
+            throw new IllegalArgumentException("请至少指定一种摘要算法");
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("size", raw.length);
+        out.put("fromFile", fromFile);
+        out.put("results", results);
+        return out;
+    }
+
+    // ===================== HMAC =====================
+
+    /**
+     * HMAC 计算（接口签名调试用）。
+     *
+     * <p>与摘要一样只能在服务端算：浏览器 {@code crypto.subtle} 虽支持 HMAC，
+     * 但在 http://<ip> 这类非安全上下文下整个 {@code crypto.subtle} 都不可用，
+     * 而工具平台经常就是这么访问的。
+     *
+     * @param message 待签名内容（UTF-8）
+     * @param key     密钥（按 keyEnc 解码）
+     * @param algo    MD5/SHA1/SHA256/SHA384/SHA512
+     * @param keyEnc  密钥编码：utf8/hex/base64
+     * @return {algo, hex, base64}
+     */
+    public Map<String, Object> hmac(String message, String key, String algo, String keyEnc) {
+        if (key == null || key.trim().isEmpty()) {
+            throw new IllegalArgumentException("HMAC 密钥不能为空");
+        }
+        byte[] k = decodeKey(key, keyEnc, "HMAC");
+        String a = algo == null || algo.trim().isEmpty() ? "SHA256" : algo.trim().toUpperCase(Locale.ROOT);
+        String jce;
+        switch (a) {
+            case "MD5": jce = "HmacMD5"; break;
+            case "SHA1": jce = "HmacSHA1"; break;
+            case "SHA256": jce = "HmacSHA256"; break;
+            case "SHA384": jce = "HmacSHA384"; break;
+            case "SHA512": jce = "HmacSHA512"; break;
+            default:
+                throw new IllegalArgumentException("不支持的 HMAC 算法：" + a
+                        + "（支持 MD5/SHA1/SHA256/SHA384/SHA512）");
+        }
+        try {
+            Mac mac = Mac.getInstance(jce);
+            mac.init(new SecretKeySpec(k, jce));
+            byte[] d = mac.doFinal(Codec.utf8(message == null ? "" : message));
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("algo", a);
+            out.put("hex", Codec.hex(d));
+            out.put("base64", Base64.getEncoder().encodeToString(d));
+            return out;
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("HMAC 算法不可用：" + a, e);
+        } catch (InvalidKeyException e) {
+            throw new IllegalArgumentException("HMAC 密钥不合法：" + rootMessage(e));
+        } catch (Exception e) {
+            throw new IllegalStateException("HMAC 计算失败：" + rootMessage(e), e);
+        }
+    }
+
+    // ===================== 字符集转换 =====================
+
+    /** 可选字符集：名称 → Java 字符集名。 */
+    private static final List<String> CHARSET_NAMES = Arrays.asList(
+            "UTF-8", "GBK", "GB2312", "Big5", "ISO-8859-1", "UTF-16", "UTF-16LE", "UTF-16BE", "ASCII");
+
+    /**
+     * 文本 → 目标字符集的字节（Hex / Base64）。
+     *
+     * <p>排查中文乱码时最直接的问题就是「这个字在某编码下到底是哪几个字节」，
+     * 所以这里把 Unicode 文本按目标字符集编码后给出原始字节。
+     *
+     * @return {charset, size, hex, base64, lossy, unmappable}
+     */
+    public Map<String, Object> charsetEncode(String text, String charset) {
+        String cs = charset(charset);
+        String s = text == null ? "" : text;
+        Charset charsetObj = Charset.forName(cs);
+        List<String> unmappable = new ArrayList<>();
+        byte[] bytes;
+        try {
+            CharsetEncoder enc = charsetObj.newEncoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT);
+            ByteBuffer buf = enc.encode(CharBuffer.wrap(s));
+            bytes = new byte[buf.remaining()];
+            buf.get(bytes);
+        } catch (UnmappableCharacterException e) {
+            // 逐字符定位无法表示的字符（最多列 10 个），字节仍按 '?' 替换给出，便于对照
+            unmappable = unmappableChars(s, charsetObj);
+            bytes = s.getBytes(charsetObj);
+        } catch (CharacterCodingException e) {
+            throw new IllegalArgumentException("字符集编码失败：" + rootMessage(e));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("charset", cs);
+        out.put("size", bytes.length);
+        out.put("hex", Codec.hex(bytes));
+        out.put("base64", Base64.getEncoder().encodeToString(bytes));
+        out.put("lossy", !unmappable.isEmpty());
+        out.put("unmappable", unmappable);
+        return out;
+    }
+
+    /** 找出在目标字符集中无法表示的字符。 */
+    private List<String> unmappableChars(String s, Charset charsetObj) {
+        List<String> out = new ArrayList<>();
+        int limit = Math.min(s.length(), 20000);
+        int i = 0;
+        while (i < limit && out.size() < 10) {
+            int cp = s.codePointAt(i);
+            int n = Character.charCount(cp);
+            try {
+                // 每次新建 encoder：一次失败后 encoder 内部状态不可复用
+                CharsetEncoder enc = charsetObj.newEncoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT);
+                enc.encode(CharBuffer.wrap(Character.toChars(cp)));
+            } catch (CharacterCodingException e) {
+                out.add("'" + new String(Character.toChars(cp)) + "' (U+" + String.format("%04X", cp) + ")");
+            }
+            i += n;
+        }
+        return out;
+    }
+
+    /**
+     * 字节（Hex / Base64）→ 文本。
+     *
+     * @param inEnc 字节的编码形式：hex/base64
+     * @return {charset, size, text}
+     */
+    public Map<String, Object> charsetDecode(String data, String inEnc, String charset) {
+        String cs = charset(charset);
+        requireNonEmpty(data);
+        byte[] bytes;
+        String e = inEnc == null ? "hex" : inEnc.trim().toLowerCase(Locale.ROOT);
+        try {
+            bytes = "base64".equals(e) ? Base64.getDecoder().decode(data.trim()) : Codec.hexDecode(data.trim());
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("字节按「" + e + "」解析失败：" + rootMessage(ex));
+        }
+        Charset charsetObj = Charset.forName(cs);
+        CharsetDecoder dec = charsetObj.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        String text;
+        try {
+            text = dec.decode(ByteBuffer.wrap(bytes)).toString();
+        } catch (CharacterCodingException ex) {
+            throw new IllegalArgumentException("不是合法的 " + cs + " 字节：" + rootMessage(ex));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("charset", cs);
+        out.put("size", bytes.length);
+        out.put("text", text);
+        return out;
+    }
+
+    private String charset(String name) {
+        String c = name == null || name.trim().isEmpty() ? "UTF-8" : name.trim();
+        // 允许用户填 gb2312 / GBK 这类大小写/别名写法
+        for (String supported : CHARSET_NAMES) {
+            if (supported.equalsIgnoreCase(c)) {
+                return supported;
+            }
+        }
+        try {
+            String resolved = Charset.forName(c).name();
+            return resolved;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("不支持的字符集：" + c
+                    + "（支持 " + String.join("/", CHARSET_NAMES) + "）");
+        }
+    }
+
+    /**
+     * JSONPath 求值：从 JSON 文本里取值（用于「取响应里的某个值」）。
+     *
+     * @return {found, value, valueText, type, matches, matchCount}
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> jsonPath(String json, String path) {
+        if (json == null || json.trim().isEmpty()) {
+            throw new IllegalArgumentException("JSON 不能为空");
+        }
+        if (path == null || path.trim().isEmpty()) {
+            throw new IllegalArgumentException("JSONPath 不能为空");
+        }
+        Object doc;
+        try {
+            doc = JsonUtils.fromJson(json, Object.class);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("JSON 解析失败：" + rootMessage(e));
+        }
+        String p = path.trim();
+        Map<String, Object> out = new LinkedHashMap<>();
+        List<Object> matches = new ArrayList<>();
+        boolean found = false;
+        Object value = null;
+        try {
+            // ALWAYS_RETURN_LIST：多值路径（如 $.items[*].id）要能一次拿到全部
+            com.jayway.jsonpath.Configuration cfg = com.jayway.jsonpath.Configuration.defaultConfiguration()
+                    .addOptions(com.jayway.jsonpath.Option.ALWAYS_RETURN_LIST);
+            Object list = com.jayway.jsonpath.JsonPath.using(cfg).parse(doc).read(p);
+            if (list instanceof List) {
+                matches.addAll((List<Object>) list);
+                found = !matches.isEmpty();
+                value = found ? matches.get(0) : null;
+            } else if (list != null) {
+                matches.add(list);
+                found = true;
+                value = list;
+            }
+        } catch (com.jayway.jsonpath.PathNotFoundException e) {
+            found = false;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("JSONPath 求值失败：" + rootMessage(e));
+        }
+        out.put("found", found);
+        out.put("value", value);
+        out.put("valueText", value == null ? "" : valueText(value));
+        out.put("type", value == null ? "" : value.getClass().getSimpleName());
+        out.put("matches", matches);
+        out.put("matchCount", matches.size());
+        return out;
+    }
+
+    /** 取值转展示串：标量直转，对象/数组紧凑 JSON，null→""。 */
+    private String valueText(Object v) {
+        if (v == null) {
+            return "";
+        }
+        if (v instanceof String || v instanceof Number || v instanceof Boolean) {
+            return String.valueOf(v);
+        }
+        try {
+            return JsonUtils.toJson(v);
+        } catch (Exception e) {
+            return String.valueOf(v);
         }
     }
 

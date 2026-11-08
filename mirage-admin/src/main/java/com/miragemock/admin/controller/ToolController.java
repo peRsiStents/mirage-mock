@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -171,6 +173,79 @@ public class ToolController {
     @PostMapping("/hash")
     public Result<String> hash(@RequestBody Map<String, String> b) {
         return run(() -> svc.hash(g(b, "text"), g(b, "algo")));
+    }
+
+    /**
+     * 摘要（MD5/SHA 系列）：文本或文件（文件走 Base64 上传，见 {@code ToolService.digest}）。
+     *
+     * <p>入参比其它工具宽松：除了字符串字段，还收 {@code algos}（算法数组）与
+     * {@code upper}（布尔），故用 {@code Map<String, Object>} 接收。
+     */
+    @PostMapping("/digest")
+    public Result<Map<String, Object>> digest(@RequestBody Map<String, Object> b) {
+        return run(() -> svc.digest(
+                str(b, "text"),
+                str(b, "contentB64"),
+                strList(b, "algos"),
+                str(b, "algo"),
+                bool(b, "upper")));
+    }
+
+    /** JSONPath 求值：从 JSON 里按路径取值（多值路径返回全部匹配）。 */
+    @PostMapping("/jsonpath")
+    public Result<Map<String, Object>> jsonPath(@RequestBody Map<String, String> b) {
+        return run(() -> svc.jsonPath(g(b, "json"), g(b, "path")));
+    }
+
+    // ===================== HMAC / 字符集 =====================
+
+    /** HMAC 签名（HMAC-MD5/SHA1/SHA256/SHA384/SHA512），输出 Hex 与 Base64。 */
+    @PostMapping("/hmac")
+    public Result<Map<String, Object>> hmac(@RequestBody Map<String, String> b) {
+        return run(() -> svc.hmac(g(b, "text"), g(b, "key"), g(b, "algo"), g(b, "keyEnc")));
+    }
+
+    /** 文本 → 目标字符集字节（Hex/Base64），用于排查中文乱码。 */
+    @PostMapping("/charset/encode")
+    public Result<Map<String, Object>> charsetEncode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.charsetEncode(g(b, "text"), g(b, "charset")));
+    }
+
+    /** 字节（Hex/Base64）→ 文本，按指定字符集解码。 */
+    @PostMapping("/charset/decode")
+    public Result<Map<String, Object>> charsetDecode(@RequestBody Map<String, String> b) {
+        return run(() -> svc.charsetDecode(g(b, "data"), g(b, "inEnc"), g(b, "charset")));
+    }
+
+    private static String str(Map<String, Object> b, String k) {
+        Object v = b.get(k);
+        return v == null ? null : String.valueOf(v);
+    }
+
+    private static boolean bool(Map<String, Object> b, String k) {
+        Object v = b.get(k);
+        if (v instanceof Boolean) {
+            return (Boolean) v;
+        }
+        return v != null && "true".equalsIgnoreCase(String.valueOf(v));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> strList(Map<String, Object> b, String k) {
+        Object v = b.get(k);
+        if (v instanceof List) {
+            List<String> out = new ArrayList<>();
+            for (Object o : (List<Object>) v) {
+                if (o != null) {
+                    out.add(String.valueOf(o));
+                }
+            }
+            return out;
+        }
+        if (v instanceof String && !((String) v).trim().isEmpty()) {
+            return java.util.Arrays.asList(((String) v).split(","));
+        }
+        return null;
     }
 
     @PostMapping("/jwt/decode")

@@ -22,12 +22,25 @@ public final class NumericFunctions {
                 MockFns.fn("int", (a, c) -> {
                     long min = FuncArgs.asLong(a, 0, 0);
                     long max = FuncArgs.asLong(a, 1, 9999);
+                    if (min > max) {
+                        throw new ExprException("int() 下界不能大于上界: " + min + " > " + max);
+                    }
+                    if (min > Integer.MAX_VALUE || max < Integer.MIN_VALUE) {
+                        throw new ExprException("int() 取值超出 int 范围: [" + min + ", " + max + "]");
+                    }
                     return (long) FakerData.randomInt((int) min, (int) max);
                 }),
                 MockFns.fn("decimal", (a, c) -> {
                     BigDecimal min = FuncArgs.asDecimal(a, 0, BigDecimal.ZERO);
                     BigDecimal max = FuncArgs.asDecimal(a, 1, new BigDecimal("9999"));
                     int scale = FuncArgs.asInt(a, 2, 2);
+                    if (min.compareTo(max) > 0) {
+                        throw new ExprException("decimal() 下界不能大于上界: " + min.toPlainString()
+                                + " > " + max.toPlainString());
+                    }
+                    if (scale < 0 || scale > 20) {
+                        throw new ExprException("decimal() scale 需在 0-20 之间: " + scale);
+                    }
                     BigDecimal r = min.add(max.subtract(min).multiply(BigDecimal.valueOf(Math.random())));
                     return r.setScale(scale, RoundingMode.HALF_UP).toPlainString();
                 }),

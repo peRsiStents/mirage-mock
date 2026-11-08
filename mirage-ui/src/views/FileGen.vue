@@ -90,9 +90,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { createGuard } from '../api/client'
+import { confirmAction } from '../utils/confirm'
 import { useProjectStore } from '../store/project'
 import FunctionMarketSidebar from '../components/FunctionMarketSidebar.vue'
 
@@ -111,24 +113,38 @@ const previewLines = ref([])
 const saving = ref(false)
 const genLoading = ref(false)
 
+// 切换项目时旧的取数请求可能后到，只让最新一次的响应回写，避免串项目的陈旧数据
+const fetchTemplates = createGuard((pid) => api.fileTemplates.list(pid))
+
 async function load() {
   if (!proj.id) return
   loading.value = true
   try {
-    const res = await api.fileTemplates.list(proj.id)
-    list.value = res.data || []
+    const res = await fetchTemplates(proj.id)
+    if (res) list.value = res.data || []
   } finally {
     loading.value = false
   }
 }
 
 function openCreate() {
+  // 显式重置全部字段：Object.assign 不会删除旧键，编辑过一次后残留的
+  // createTime/updateTime 等服务端字段会被一起提交给新建接口
+  Object.keys(form).forEach((k) => { delete form[k] })
   Object.assign(form, { id: null, name: '', headerLine: '', rowTemplate: '', rowCount: 100, encoding: 'GBK', lineSeparator: 'CRLF', fileExt: 'txt', remark: '' })
   formVisible.value = true
 }
 
 function openEdit(row) {
-  Object.assign(form, row)
+  // 显式字段赋值：Object.assign 不会删除旧键，编辑过一次后 form 会残留
+  // createTime/updateTime/projectId 等服务端字段，新建时会被一起提交，
+  // 导致新记录继承上一条记录的时间戳。
+  Object.assign(form, {
+    id: row.id, name: row.name || '', headerLine: row.headerLine || '',
+    rowTemplate: row.rowTemplate || '', rowCount: row.rowCount == null ? 100 : row.rowCount,
+    encoding: row.encoding || 'GBK', lineSeparator: row.lineSeparator || 'CRLF',
+    fileExt: row.fileExt || 'txt', remark: row.remark || ''
+  })
   formVisible.value = true
 }
 
@@ -230,7 +246,7 @@ function onGen(row) {
 }
 
 async function onRemove(row) {
-  await ElMessageBox.confirm(`删除模板「${row.name || '未命名'}」？`, '警告', { type: 'warning' })
+  if (!(await confirmAction(`删除模板「${row.name || '未命名'}」？`, { title: '警告' }))) return
   await api.fileTemplates.remove(row.id)
   ElMessage.success('已删除')
   load()

@@ -10,7 +10,8 @@ import java.util.List;
 public final class Lexer {
 
     public enum Type {
-        STRING, NUMBER, IDENT, PLUS, MINUS, LPAREN, RPAREN, COMMA, NESTED, FUNC_RAW, EOF
+        STRING, NUMBER, IDENT, PLUS, MINUS, STAR, SLASH, PERCENT,
+        LPAREN, RPAREN, COMMA, NESTED, FUNC_RAW, EOF
     }
 
     public static final class Token {
@@ -51,6 +52,15 @@ public final class Lexer {
                     break;
                 case '-':
                     add(Type.MINUS, "-");
+                    break;
+                case '*':
+                    add(Type.STAR, "*");
+                    break;
+                case '/':
+                    add(Type.SLASH, "/");
+                    break;
+                case '%':
+                    add(Type.PERCENT, "%");
                     break;
                 case '(':
                     add(Type.LPAREN, "(");
@@ -118,8 +128,28 @@ public final class Lexer {
                     case '"':
                         sb.append('"');
                         break;
+                    case 'u': {
+                        // unicode 转义：反斜杠 + u + 4 位十六进制，不足或非法直接报错
+                        if (pos + 6 > src.length()) {
+                            throw new ExprException("unicode 转义需要 4 位十六进制字符，起始于位置 " + pos);
+                        }
+                        String hex = src.substring(pos + 2, pos + 6);
+                        int code = 0;
+                        for (int k = 0; k < 4; k++) {
+                            char h = hex.charAt(k);
+                            int d = Character.digit(h, 16);
+                            if (d < 0) {
+                                throw new ExprException("unicode 转义包含非法十六进制字符 '" + h + "': " + hex);
+                            }
+                            code = (code << 4) | d;
+                        }
+                        sb.append((char) code);
+                        pos += 6;
+                        continue;
+                    }
                     default:
-                        sb.append(n);
+                        // 未知转义保留反斜杠（如 '\d' 仍是反斜杠 + d），供 regex 等函数使用
+                        sb.append('\\').append(n);
                 }
                 pos += 2;
                 continue;
@@ -135,19 +165,61 @@ public final class Lexer {
         throw new ExprException("字符串字面量未闭合，起始于位置 " + start);
     }
 
+    /**
+     * 数字字面量：整数（long）或小数/科学计数法（double）。
+     * 支持形如 123、.5、1.5、1e5、1.5e-2；畸形数字（1.2.3、1.、1e 等）抛 ExprException。
+     */
     private void readNumber() {
         int start = pos;
-        while (pos < src.length() && (isDigit(src.charAt(pos)) || src.charAt(pos) == '.')) {
+        boolean decimal = false;
+        if (src.charAt(pos) == '.') {
+            decimal = true;
             pos++;
+            requireDigit(start);
+            readDigits();
+        } else {
+            readDigits();
+            if (pos < src.length() && src.charAt(pos) == '.') {
+                decimal = true;
+                pos++;
+                requireDigit(start);
+                readDigits();
+            }
+        }
+        if (pos < src.length() && (src.charAt(pos) == 'e' || src.charAt(pos) == 'E')) {
+            decimal = true;
+            pos++;
+            if (pos < src.length() && (src.charAt(pos) == '+' || src.charAt(pos) == '-')) {
+                pos++;
+            }
+            requireDigit(start);
+            readDigits();
+        }
+        if (pos < src.length() && src.charAt(pos) == '.') {
+            // 如 1.2.3：小数点后跟小数点，畸形
+            throw new ExprException("畸形数字字面量: " + src.substring(start, pos + 1) + "（位置 " + start + "）");
         }
         String text = src.substring(start, pos);
         Object value;
-        if (text.indexOf('.') >= 0) {
-            value = Double.parseDouble(text);
-        } else {
-            value = Long.parseLong(text);
+        try {
+            value = decimal ? (Object) Double.parseDouble(text) : (Object) Long.parseLong(text);
+        } catch (NumberFormatException e) {
+            throw new ExprException("畸形数字字面量: " + text + "（位置 " + start + "）", e);
         }
         tokens.add(new Token(Type.NUMBER, value, start));
+    }
+
+    private void readDigits() {
+        while (pos < src.length() && isDigit(src.charAt(pos))) {
+            pos++;
+        }
+    }
+
+    private void requireDigit(int start) {
+        if (pos >= src.length() || !isDigit(src.charAt(pos))) {
+            throw new ExprException("畸形数字字面量: " + src.substring(start, Math.min(pos + 1, src.length()))
+                    + "（位置 " + start + "）");
+        }
     }
 
     private void readIdentOrDateFunc() {

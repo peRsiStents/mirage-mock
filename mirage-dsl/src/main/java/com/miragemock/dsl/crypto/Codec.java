@@ -31,15 +31,41 @@ public final class Codec {
         return new String(out);
     }
 
+    /**
+     * Hex 解码：非法输入一律抛 IllegalArgumentException。
+     *
+     * <p>不做静默容错：奇数长度会截断半个字节、非法字符会被 Character.digit 判为 -1
+     * 并拼成 0xFF 之类的垃圾字节，静默产出错误数据比报错更难排查。
+     *
+     * @throws IllegalArgumentException 长度为奇数或含非 hex 字符
+     */
     public static byte[] hexDecode(String s) {
-        String clean = s.toLowerCase(Locale.ROOT).replace(" ", "").replace("\n", "");
+        if (s == null) {
+            throw new IllegalArgumentException("hex 解码失败：输入为 null");
+        }
+        String clean = s.toLowerCase(Locale.ROOT).replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "");
         int len = clean.length();
+        if (len % 2 != 0) {
+            throw new IllegalArgumentException("hex 解码失败：长度为奇数（" + len + "），需为偶数："
+                    + abbreviate(s));
+        }
         byte[] out = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
-            out[i / 2] = (byte) ((Character.digit(clean.charAt(i), 16) << 4)
-                    | Character.digit(clean.charAt(i + 1), 16));
+            int hi = Character.digit(clean.charAt(i), 16);
+            int lo = Character.digit(clean.charAt(i + 1), 16);
+            if (hi < 0 || lo < 0) {
+                throw new IllegalArgumentException("hex 解码失败：包含非法十六进制字符 '"
+                        + (hi < 0 ? clean.charAt(i) : clean.charAt(i + 1)) + "'："
+                        + abbreviate(s));
+            }
+            out[i / 2] = (byte) ((hi << 4) | lo);
         }
         return out;
+    }
+
+    /** 错误消息里的输入摘要：过长时截断，避免日志/响应被超长输入撑爆 */
+    private static String abbreviate(String s) {
+        return s.length() <= 64 ? s : s.substring(0, 64) + "...";
     }
 
     public static byte[] utf8(String s) {

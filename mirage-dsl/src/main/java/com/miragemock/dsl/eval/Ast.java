@@ -63,6 +63,59 @@ public final class Ast {
         }
     }
 
+    /** 减法 */
+    public static final class Minus implements Node {
+        public final Node left;
+        public final Node right;
+
+        public Minus(Node left, Node right) {
+            this.left = left;
+            this.right = right;
+        }
+    }
+
+    /** 乘法 */
+    public static final class Mul implements Node {
+        public final Node left;
+        public final Node right;
+
+        public Mul(Node left, Node right) {
+            this.left = left;
+            this.right = right;
+        }
+    }
+
+    /** 除法 */
+    public static final class Div implements Node {
+        public final Node left;
+        public final Node right;
+
+        public Div(Node left, Node right) {
+            this.left = left;
+            this.right = right;
+        }
+    }
+
+    /** 取模 */
+    public static final class Mod implements Node {
+        public final Node left;
+        public final Node right;
+
+        public Mod(Node left, Node right) {
+            this.left = left;
+            this.right = right;
+        }
+    }
+
+    /** 一元负号 */
+    public static final class Neg implements Node {
+        public final Node inner;
+
+        public Neg(Node inner) {
+            this.inner = inner;
+        }
+    }
+
     /** 函数调用 */
     public static final class FuncCall implements Node {
         public final String name;

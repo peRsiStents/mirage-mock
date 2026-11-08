@@ -147,7 +147,7 @@ public final class FakerData {
 
     public static String bankcard() {
         StringBuilder sb = new StringBuilder(pick(BANK_BINS));
-        int targetLen = 16 + RNG.nextInt(3) * 3; // 16/19
+        int targetLen = RNG.nextBoolean() ? 16 : 19; // 16 或 19 位（22 位并非通用卡号长度）
         while (sb.length() < targetLen - 1) {
             sb.append(RNG.nextInt(10));
         }

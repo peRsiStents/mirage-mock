@@ -35,10 +35,10 @@ public final class FunctionCatalog {
 
                 // 字符串
                 new FunctionDescriptor("string", "字符串", "定长/区间随机字符串，charset: alpha/numeric/alpha_num/hex", "${string(alpha_num, 32)}", "string"),
-                new FunctionDescriptor("regex", "字符串", "按正则生成字符串", "${regex('^ORD\\\\d{6}$')}", "string"),
+                new FunctionDescriptor("regex", "字符串", "按正则生成字符串（正则里的反斜杠按原样保留，如 \\d 即数字）", "${regex('^ORD\\\\d{6}$')}", "string"),
                 new FunctionDescriptor("enum", "字符串", "枚举随机取一", "${enum('a','b','c')}", "string"),
                 new FunctionDescriptor("concat", "字符串", "字符串拼接", "${concat('ORD', ${string(numeric,6)})}", "string"),
-                new FunctionDescriptor("repeat", "字符串", "生成 n 元素数组（在叶子节点使用）", "${repeat(3, { orderNo: ${string(numeric,6)} })}", "array"),
+                new FunctionDescriptor("repeat", "字符串", "生成 n 元素数组（在叶子节点使用，子模板需为合法 JSON）", "${repeat(3, {\"orderNo\": \"${string(numeric,6)}\"})}", "array"),
 
                 // 时间
                 new FunctionDescriptor("date", "时间", "随机日期，支持 now/now-30d", "${date(now-30d, now, yyyy-MM-dd)}", "string"),
@@ -67,7 +67,12 @@ public final class FunctionCatalog {
                 // 上下文变量
                 new FunctionDescriptor("path.*", "上下文变量", "HTTP 路径变量", "${path.userId}", "any"),
                 new FunctionDescriptor("field.*", "上下文变量", "TCP 报文字段 / HTTP请求体字段 / 已渲染字段引用", "${field.serialNo}", "any"),
-                new FunctionDescriptor("count", "上下文变量", "文件生成：数据行数（=生成行数，可用于首行汇总笔数）", "${count}", "long")
+                new FunctionDescriptor("count", "上下文变量", "文件生成：数据行数（=生成行数，可用于首行汇总笔数）", "${count}", "long"),
+
+                // 表达式运算
+                new FunctionDescriptor("+ - * / %", "表达式运算", "四则运算与取余（除零报错）", "${100 - 20 * 3}", "number"),
+                new FunctionDescriptor("( )", "表达式运算", "括号分组", "${(100 - 20) * 3}", "number"),
+                new FunctionDescriptor("数字字面量", "表达式运算", "支持科学计数法", "${1.5e3}", "number")
         );
     }
 }
