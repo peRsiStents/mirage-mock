@@ -19,6 +19,7 @@ public enum ResultCode {
     CONFLICT(40900, "资源冲突"),
 
     LOGIN_FAILED(40101, "用户名或密码错误"),
+    LOGIN_RATE_LIMITED(42900, "登录尝试过于频繁，请稍后再试"),
     PROJECT_NOT_FOUND(40401, "项目不存在"),
     INTERFACE_NOT_FOUND(40402, "接口不存在"),
     RULE_NOT_FOUND(40403, "规则不存在"),

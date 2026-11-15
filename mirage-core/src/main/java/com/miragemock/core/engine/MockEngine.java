@@ -2,7 +2,10 @@ package com.miragemock.core.engine;
 
 import com.miragemock.common.api.ResultCode;
 import com.miragemock.common.constant.Constants;
+import com.miragemock.common.entity.ApiInterface;
 import com.miragemock.common.entity.MockRule;
+import com.miragemock.common.enums.DelayType;
+import com.miragemock.common.enums.FaultType;
 import com.miragemock.common.exception.BizException;
 import com.miragemock.common.util.JsonUtils;
 import com.miragemock.core.cache.CompiledInterface;
@@ -55,26 +58,12 @@ public class MockEngine {
     }
 
     public HttpMockResult handleHttp(RequestSnapshot req) {
-        String code = req.getHeaders() == null ? null : req.getHeaders().get(Constants.HEADER_PROJECT_CODE.toLowerCase());
-        boolean hasProjectHeader = code != null && !code.isEmpty();
-
-        ProjectSnapshot snap = resolveProject(req);
-        InterfaceMatch im;
-        if (snap != null) {
-            // 有项目标识（header 指定 或 全局仅一个项目）：在该项目内路由
-            im = matchInterface(snap, req);
-        } else if (!hasProjectHeader) {
-            // 无标识且多项目：跨项目按 method+path 唯一定位（路径全局唯一即可命中）
-            im = resolveByUniquePath(req);
-        } else {
-            // header 指定的项目编码不存在
-            im = null;
-        }
+        InterfaceMatch im = resolveHttpInterface(req);
         if (im == null) {
-            Long pid = snap == null ? null : snap.getProjectId();
-            return HttpMockResult.notMatched(pid, null, noRuleResponse(req));
+            ProjectSnapshot snap = resolveProject(req);
+            return HttpMockResult.notMatched(snap == null ? null : snap.getProjectId(), null, noRuleResponse(req));
         }
-        snap = im.snapshot;
+        ProjectSnapshot snap = im.snapshot;
 
         CompiledRule hit = null;
         for (CompiledRule rule : im.iface.getRules()) {
@@ -105,6 +94,40 @@ public class MockEngine {
     }
 
     // ============ 接口路由 ============
+
+    /**
+     * 定位 HTTP 接口（与 handleHttp 同一套路由逻辑）：
+     * 项目内路由 → 无标识跨项目唯一路径 → 歧义/不存在返回 null。
+     */
+    private InterfaceMatch resolveHttpInterface(RequestSnapshot req) {
+        ProjectSnapshot snap = resolveProject(req);
+        boolean hasProjectHeader = req.getHeaders() != null
+                && req.getHeaders().get(Constants.HEADER_PROJECT_CODE.toLowerCase()) != null
+                && !req.getHeaders().get(Constants.HEADER_PROJECT_CODE.toLowerCase()).isEmpty();
+        if (snap != null) {
+            return matchInterface(snap, req);
+        }
+        if (!hasProjectHeader) {
+            return resolveByUniquePath(req);
+        }
+        return null;
+    }
+
+    /**
+     * 录制回放配置提示：未命中规则时由 HTTP 层查询该接口的代理配置（录制模式 + 上游地址）。
+     *
+     * @return 接口存在且为 HTTP 时返回其代理配置；否则 null
+     */
+    public ProxyHint resolveProxyHint(RequestSnapshot req) {
+        InterfaceMatch im = resolveHttpInterface(req);
+        if (im == null) {
+            return null;
+        }
+        ApiInterface entity = im.iface.getEntity();
+        Integer mode = entity.getRecordMode();
+        return new ProxyHint(im.snapshot.getProjectId(), im.iface.getId(),
+                mode == null ? 0 : mode, entity.getUpstreamUrl());
+    }
 
     private InterfaceMatch matchInterface(ProjectSnapshot snap, RequestSnapshot req) {
         String method = req.getMethod() == null ? "" : req.getMethod().toUpperCase();
@@ -176,15 +199,16 @@ public class MockEngine {
     private MockResponse applyFaultOrRender(CompiledRule rule, RequestSnapshot req,
                                              Map<String, String> pathVars, ProjectSnapshot snap) {
         applyDelay(rule.getEntity());
-        String fault = rule.getEntity().getFaultType();
-        if ("RESET".equalsIgnoreCase(fault)) {
-            return MockResponse.reset();
-        }
-        if ("TIMEOUT".equalsIgnoreCase(fault)) {
-            return MockResponse.timeout();
-        }
-        if ("ERROR_STATUS".equalsIgnoreCase(fault)) {
-            return errorStatusResponse(rule.getEntity());
+        FaultType fault = parseEnum(FaultType.class, rule.getEntity().getFaultType(), FaultType.NONE);
+        switch (fault) {
+            case RESET:
+                return MockResponse.reset();
+            case TIMEOUT:
+                return MockResponse.timeout();
+            case ERROR_STATUS:
+                return errorStatusResponse(rule.getEntity());
+            default:
+                break;
         }
         // 正常渲染
         Map<String, Object> baseVars = new HashMap<>();
@@ -235,6 +259,33 @@ public class MockEngine {
         return MockResponse.write(status, null, body);
     }
 
+    /**
+     * 计算规则延迟毫秒数（纯计算，不阻塞调用线程）。
+     * TCP 路径由调用方在 Netty 事件循环上异步调度延迟；HTTP 路径由 {@link #applyDelay} 同步 sleep。
+     */
+    public static long computeDelayMs(MockRule rule) {
+        if (rule == null) {
+            return 0;
+        }
+        DelayType type = parseEnum(DelayType.class, rule.getDelayType(), DelayType.NONE);
+        long ms;
+        switch (type) {
+            case FIXED:
+                ms = rule.getDelayMs() == null ? 0 : rule.getDelayMs();
+                break;
+            case RANDOM: {
+                int min = rule.getDelayMinMs() == null ? 0 : rule.getDelayMinMs();
+                int max = rule.getDelayMaxMs() == null ? 0 : rule.getDelayMaxMs();
+                ms = max <= min ? min : ThreadLocalRandom.current().nextLong(min, max + 1);
+                break;
+            }
+            default:
+                ms = 0;
+        }
+        return ms <= 0 ? 0 : Math.min(ms, MAX_DELAY_MS);
+    }
+
+    /** HTTP 路径：延迟在 Servlet 工作线程上同步 sleep（每请求独立线程，可接受）。 */
     private void applyDelay(MockRule rule) {
         long ms = computeDelayMs(rule);
         if (ms <= 0) {
@@ -248,27 +299,6 @@ public class MockEngine {
         }
     }
 
-    /** 计算规则延迟毫秒（0 表示无延迟；封顶 MAX_DELAY_MS），HTTP/TCP 共用 */
-    private long computeDelayMs(MockRule rule) {
-        String type = rule.getDelayType();
-        if (type == null || "NONE".equalsIgnoreCase(type)) {
-            return 0;
-        }
-        long ms = 0;
-        if ("FIXED".equalsIgnoreCase(type)) {
-            ms = rule.getDelayMs() == null ? 0 : rule.getDelayMs();
-        } else if ("RANDOM".equalsIgnoreCase(type)) {
-            int min = rule.getDelayMinMs() == null ? 0 : rule.getDelayMinMs();
-            int max = rule.getDelayMaxMs() == null ? 0 : rule.getDelayMaxMs();
-            if (max <= min) {
-                ms = min;
-            } else {
-                ms = ThreadLocalRandom.current().nextLong(min, max + 1);
-            }
-        }
-        return ms <= 0 ? 0 : Math.min(ms, MAX_DELAY_MS);
-    }
-
     private MockResponse noRuleResponse(RequestSnapshot req) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "NO_RULE_MATCHED");
@@ -277,20 +307,35 @@ public class MockEngine {
         return MockResponse.write(404, null, body);
     }
 
+    /** 兼容存量字符串配置的枚举解析：非法/缺失值回退默认值 */
+    private static <E extends Enum<E>> E parseEnum(Class<E> type, String value, E defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            return Enum.valueOf(type, value.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return defaultValue;
+        }
+    }
+
     // ===================== TCP =====================
 
     /**
-     * TCP 报文处理入口：定位接口 → 规则匹配 → 延迟/故障/渲染，返回响应字段（由 TCP 层按报文格式编码回写）。
+     * TCP 报文处理·阶段一：定位接口 → 规则匹配 → 计算延迟。
+     *
+     * <p>本阶段不做任何阻塞操作（不 sleep、不渲染），由调用方（TCP 层）根据返回的
+     * {@link TcpMatch#getDelayMs()} 在事件循环上异步调度阶段二，避免阻塞 Netty EventLoop。</p>
      */
-    public TcpMockResult handleTcp(Long projectId, Long listenerId, String routeValue,
-                                   Map<String, Object> fields, String clientAddr) {
+    public TcpMatch matchTcp(Long projectId, Long listenerId, String routeValue,
+                             Map<String, Object> fields, String clientAddr) {
         ProjectSnapshot snap = cache.getProject(projectId);
         if (snap == null) {
-            return TcpMockResult.notMatched(null, null, routeValue);
+            return TcpMatch.notMatched(null, null, routeValue);
         }
         CompiledInterface iface = findTcpInterface(snap, listenerId, routeValue);
         if (iface == null) {
-            return TcpMockResult.notMatched(projectId, null, routeValue);
+            return TcpMatch.notMatched(projectId, null, routeValue);
         }
         RequestSnapshot rs = RequestSnapshot.builder()
                 .protocol("TCP")
@@ -307,23 +352,35 @@ public class MockEngine {
             }
         }
         if (hit == null) {
-            return TcpMockResult.notMatched(projectId, iface.getId(), routeValue);
+            return TcpMatch.notMatched(projectId, iface.getId(), routeValue);
         }
+        long delayMs = computeDelayMs(hit.getEntity());
+        return new TcpMatch(true, projectId, iface.getId(), hit.getId(), hit, fields, delayMs);
+    }
 
-        // TCP 路径引擎不 sleep：延迟值放进结果，由 TcpMockHandler 调度（见 TcpMockResult.delayMs）
-        int delayMs = (int) computeDelayMs(hit.getEntity());
-        String fault = hit.getEntity().getFaultType();
-        if ("RESET".equalsIgnoreCase(fault)) {
-            return withDelay(TcpMockResult.fault(projectId, iface.getId(), hit.getId(), TcpMockResult.Action.RESET), delayMs);
+    /**
+     * TCP 报文处理·阶段二：故障注入 + 模板渲染。
+     *
+     * <p>由调用方在延迟结束后（或延迟为 0 时立即）调用，此时线程为事件循环线程，本方法
+     * 仅做 CPU 渲染（微秒~毫秒级），不再包含任何 sleep。</p>
+     */
+    public TcpMockResult renderTcp(TcpMatch match) {
+        MockRule rule = match.getRule().getEntity();
+        FaultType fault = parseEnum(FaultType.class, rule.getFaultType(), FaultType.NONE);
+        switch (fault) {
+            case RESET:
+                return TcpMockResult.fault(match.getProjectId(), match.getInterfaceId(), match.getRuleId(),
+                        TcpMockResult.Action.RESET);
+            case TIMEOUT:
+                return TcpMockResult.fault(match.getProjectId(), match.getInterfaceId(), match.getRuleId(),
+                        TcpMockResult.Action.TIMEOUT);
+            default:
+                break;
         }
-        if ("TIMEOUT".equalsIgnoreCase(fault)) {
-            return withDelay(TcpMockResult.fault(projectId, iface.getId(), hit.getId(), TcpMockResult.Action.TIMEOUT), delayMs);
-        }
-
         Map<String, Object> baseVars = new HashMap<>();
-        flattenFields("field", fields, baseVars);
-        EvalContext ctx = new EvalContext(baseVars, secretResolver, seqProvider, projectId);
-        RenderedResponse rr = renderer.render(hit.getTemplateNode(), baseVars, ctx);
+        flattenFields("field", match.getFields(), baseVars);
+        EvalContext ctx = new EvalContext(baseVars, secretResolver, seqProvider, match.getProjectId());
+        RenderedResponse rr = renderer.render(match.getRule().getTemplateNode(), baseVars, ctx);
         Object body = rr.getBody();
         if (!(body instanceof Map)) {
             // 渲染结果非 JSON 对象（数组/标量/null）无法编码为 TCP 报文字段，直接报错而非静默空响应
@@ -333,14 +390,66 @@ public class MockEngine {
         }
         @SuppressWarnings("unchecked")
         Map<String, Object> respFields = (Map<String, Object>) body;
-        return withDelay(TcpMockResult.write(projectId, iface.getId(), hit.getId(), respFields), delayMs);
+        return TcpMockResult.write(match.getProjectId(), match.getInterfaceId(), match.getRuleId(), respFields);
     }
 
-    private static TcpMockResult withDelay(TcpMockResult r, int delayMs) {
-        if (delayMs > 0) {
-            r.setDelayMs(delayMs);
+    /**
+     * TCP 匹配结果（阶段一产物）：携带命中规则、请求字段与延迟毫秒数，供阶段二渲染。
+     */
+    public static final class TcpMatch {
+        private final boolean matched;
+        private final Long projectId;
+        private final Long interfaceId;
+        private final Long ruleId;
+        private final CompiledRule rule;
+        private final Map<String, Object> fields;
+        private final long delayMs;
+
+        private TcpMatch(boolean matched, Long projectId, Long interfaceId, Long ruleId,
+                         CompiledRule rule, Map<String, Object> fields, long delayMs) {
+            this.matched = matched;
+            this.projectId = projectId;
+            this.interfaceId = interfaceId;
+            this.ruleId = ruleId;
+            this.rule = rule;
+            this.fields = fields;
+            this.delayMs = delayMs;
         }
-        return r;
+
+        public static TcpMatch notMatched(Long projectId, Long interfaceId, String routeValue) {
+            return new TcpMatch(false, projectId, interfaceId, null, null, null, 0);
+        }
+
+        public boolean isMatched() {
+            return matched;
+        }
+
+        public Long getProjectId() {
+            return projectId;
+        }
+
+        public Long getInterfaceId() {
+            return interfaceId;
+        }
+
+        public Long getRuleId() {
+            return ruleId;
+        }
+
+        /** 命中规则（仅 matched 时非空） */
+        public CompiledRule getRule() {
+            return rule;
+        }
+
+        /** 请求解析字段（仅 matched 时非空） */
+        public Map<String, Object> getFields() {
+            return fields;
+        }
+
+        /** 规则延迟毫秒数，调用方应在事件循环上异步调度阶段二 */
+        public long getDelayMs() {
+            return delayMs;
+        }
     }
 
     private CompiledInterface findTcpInterface(ProjectSnapshot snap, Long listenerId, String routeValue) {
@@ -376,6 +485,40 @@ public class MockEngine {
 
     // ============ 内部 ============
 
+    /**
+     * 录制回放代理配置提示（HTTP 层未命中规则时使用）。
+     */
+    public static final class ProxyHint {
+        private final Long projectId;
+        private final Long interfaceId;
+        private final int recordMode;
+        private final String upstreamUrl;
+
+        public ProxyHint(Long projectId, Long interfaceId, int recordMode, String upstreamUrl) {
+            this.projectId = projectId;
+            this.interfaceId = interfaceId;
+            this.recordMode = recordMode;
+            this.upstreamUrl = upstreamUrl;
+        }
+
+        public Long getProjectId() {
+            return projectId;
+        }
+
+        public Long getInterfaceId() {
+            return interfaceId;
+        }
+
+        /** 0=关闭 1=录制 2=回放 */
+        public int getRecordMode() {
+            return recordMode;
+        }
+
+        public String getUpstreamUrl() {
+            return upstreamUrl;
+        }
+    }
+
     private static final class InterfaceMatch {
         final ProjectSnapshot snapshot;
         final CompiledInterface iface;
@@ -391,12 +534,29 @@ public class MockEngine {
     /** 暴露给试算（evaluate）使用的渲染入口 */
     public RenderedResponse renderForEval(com.fasterxml.jackson.databind.JsonNode templateNode,
                                           Map<String, Object> baseVars, Long projectId) {
+        return renderForEval(templateNode, baseVars, projectId, false);
+    }
+
+    /**
+     * 试算渲染入口（strict 开启后：表达式主体位置的未知变量直接抛错，便于用户在保存前发现拼写错误）。
+     */
+    public RenderedResponse renderForEval(com.fasterxml.jackson.databind.JsonNode templateNode,
+                                          Map<String, Object> baseVars, Long projectId, boolean strict) {
         EvalContext ctx = new EvalContext(baseVars, secretResolver, seqProvider, projectId);
+        if (strict) {
+            ctx.setStrict(true);
+        }
         return renderer.render(templateNode, baseVars, ctx);
     }
 
     public List<CompiledInterface> httpInterfacesOf(Long projectId) {
         ProjectSnapshot snap = cache.getProject(projectId);
         return snap == null ? java.util.Collections.emptyList() : snap.httpInterfaces();
+    }
+
+    /** 项目编码（供响应追踪头展示；未知项目返回 null） */
+    public String projectCodeOf(Long projectId) {
+        ProjectSnapshot snap = cache.getProject(projectId);
+        return snap == null ? null : snap.getProjectCode();
     }
 }

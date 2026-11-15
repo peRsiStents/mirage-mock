@@ -1,0 +1,50 @@
+# Mirage Mock 容器化部署：app + MySQL 8
+# 用法：
+#   MIRAGE_JWT_SECRET=$(openssl rand -base64 48) \
+#   MIRAGE_MASTER_KEY=$(openssl rand -base64 48) \
+#   docker compose up -d --build
+#
+# 生产务必修改下方 db 的 root/用户密码（或通过 .env 注入）。
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me-root}
+      MYSQL_DATABASE: mirage
+      MYSQL_USER: mirage
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change-me-app}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD:-change-me-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "9080:9080"    # 管理端 REST + UI
+      - "19080:19080"  # HTTP Mock 流量
+    environment:
+      MIRAGE_PROFILE: prod
+      MIRAGE_DB_URL: jdbc:mysql://db:3306/mirage?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      MIRAGE_DB_USER: mirage
+      MIRAGE_DB_PASSWORD: ${MYSQL_PASSWORD:-change-me-app}
+      # 安全密钥：不提供则 docker compose 直接报错（与 fail-fast 策略一致）
+      MIRAGE_JWT_SECRET: ${MIRAGE_JWT_SECRET:?必须设置 MIRAGE_JWT_SECRET（openssl rand -base64 48）}
+      MIRAGE_MASTER_KEY: ${MIRAGE_MASTER_KEY:?必须设置 MIRAGE_MASTER_KEY（openssl rand -base64 48）}
+      # 测试执行器 SSRF 防护：公网/多用户部署建议 true
+      MIRAGE_TEST_BLOCK_PRIVATE: ${MIRAGE_TEST_BLOCK_PRIVATE:-false}
+
+volumes:
+  mysql-data:

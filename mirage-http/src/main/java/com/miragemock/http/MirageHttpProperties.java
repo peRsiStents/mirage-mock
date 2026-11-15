@@ -31,4 +31,5 @@ public class MirageHttpProperties {
 
     /** 路径匹配是否容忍末尾斜杠（/api/users 与 /api/users/ 等价） */
     private boolean trailingSlashTolerant = true;
+
 }

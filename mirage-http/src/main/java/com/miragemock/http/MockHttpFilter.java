@@ -1,5 +1,6 @@
 package com.miragemock.http;
 
+import com.miragemock.common.constant.Constants;
 import com.miragemock.common.util.JsonUtils;
 import com.miragemock.core.engine.HttpMockResult;
 import com.miragemock.core.engine.MockEngine;
@@ -7,6 +8,8 @@ import com.miragemock.core.engine.MockResponse;
 import com.miragemock.core.log.RequestLogEntry;
 import com.miragemock.core.log.RequestLogSink;
 import com.miragemock.core.match.RequestSnapshot;
+import com.miragemock.http.proxy.MockProxy;
+import com.miragemock.http.proxy.MockProxyResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +40,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * HTTP Mock 拦截过滤器：仅当请求落在 Mock 端口时短路处理，其余透传给管理端。
+ * 规则未命中时支持录制回放（代理模式，见 {@link #tryProxy}）。
  */
 @Component
 public class MockHttpFilter implements Filter {
@@ -60,12 +64,15 @@ public class MockHttpFilter implements Filter {
     private final MockEngine engine;
     private final RequestLogSink logSink;
     private final MirageHttpProperties props;
+    private final MockProxy mockProxy;
 
     @Autowired
-    public MockHttpFilter(MockEngine engine, RequestLogSink logSink, MirageHttpProperties props) {
+    public MockHttpFilter(MockEngine engine, RequestLogSink logSink, MirageHttpProperties props,
+                          MockProxy mockProxy) {
         this.engine = engine;
         this.logSink = logSink;
         this.props = props;
+        this.mockProxy = mockProxy;
     }
 
     @Override
@@ -118,11 +125,33 @@ public class MockHttpFilter implements Filter {
             ruleId = result.getRuleId();
             matched = result.isMatched();
 
-            if (result.getResponse() != null && result.getResponse().getAction() == MockResponse.Action.TIMEOUT) {
+            if (!matched) {
+                // 规则未命中 → 尝试录制回放（代理模式）
+                MockProxyResult proxy = tryProxy(snapshot);
+                if (proxy != null) {
+                    MockEngine.ProxyHint hint = engine.resolveProxyHint(snapshot);
+                    projectId = hint.getProjectId();
+                    interfaceId = hint.getInterfaceId();
+                    ruleId = null;
+                    matched = true; // 由代理服务（录制/回放）给出响应
+                    setMirageTraceHeaders(resp, projectId, interfaceId, null, true, "proxy",
+                            (int) (System.currentTimeMillis() - t0));
+                    responseRaw = writeProxyResponse(resp, proxy);
+                } else {
+                    setMirageTraceHeaders(resp, projectId, interfaceId, null, false, null,
+                            (int) (System.currentTimeMillis() - t0));
+                    responseRaw = writeResponse(resp, result.getResponse());
+                }
+            } else if (result.getResponse() != null
+                    && result.getResponse().getAction() == MockResponse.Action.TIMEOUT) {
                 // TIMEOUT 故障：异步挂起，不占用容器工作线程
+                setMirageTraceHeaders(resp, projectId, interfaceId, ruleId, true, null,
+                        (int) (System.currentTimeMillis() - t0));
                 async = doAsyncTimeout(req, resp, result.getResponse());
                 responseRaw = "";
             } else {
+                setMirageTraceHeaders(resp, projectId, interfaceId, ruleId, true, null,
+                        (int) (System.currentTimeMillis() - t0));
                 responseRaw = writeResponse(resp, result.getResponse());
             }
         } catch (BodyTooLargeException e) {
@@ -167,7 +196,69 @@ public class MockHttpFilter implements Filter {
         // no-op
     }
 
+    // ============ 录制回放（代理模式） ============
+
+    /**
+     * 规则未命中时的录制回放尝试：
+     * 回放模式（2）先查录制快照；仍无结果且非关闭模式（1/2）且配置了上游地址时转发上游（并按需录制）。
+     *
+     * @return 代理响应；未启用/无快照/转发失败返回 null（保持原有 404 行为）
+     */
+    private MockProxyResult tryProxy(RequestSnapshot snapshot) {
+        MockEngine.ProxyHint hint = engine.resolveProxyHint(snapshot);
+        if (hint == null || hint.getUpstreamUrl() == null || hint.getUpstreamUrl().isEmpty()) {
+            return null;
+        }
+        MockProxyResult proxy = null;
+        if (hint.getRecordMode() == Constants.RECORD_MODE_REPLAY) {
+            proxy = mockProxy.replay(hint, snapshot);
+        }
+        if (proxy == null && hint.getRecordMode() != Constants.RECORD_MODE_OFF) {
+            proxy = mockProxy.forward(hint, snapshot);
+        }
+        return proxy;
+    }
+
+    private String writeProxyResponse(HttpServletResponse resp, MockProxyResult proxy) throws IOException {
+        resp.setStatus(proxy.getStatus());
+        for (Map.Entry<String, String> e : proxy.getHeaders().entrySet()) {
+            resp.setHeader(e.getKey(), e.getValue());
+        }
+        String text = proxy.getBody();
+        resp.setCharacterEncoding("UTF-8");
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        resp.setContentType(proxy.getHeaders().getOrDefault("Content-Type", "application/json;charset=UTF-8"));
+        resp.getWriter().write(text);
+        resp.getWriter().flush();
+        return text;
+    }
+
     // ============ 响应写入 ============
+
+    /**
+     * 附加 Mock 命中追踪头，便于联调时确认请求走了哪个项目/接口/规则：
+     * X-Mirage-Project / X-Mirage-Interface / X-Mirage-Rule / X-Mirage-Matched / X-Mirage-Mode / X-Mirage-Cost-Ms
+     */
+    private void setMirageTraceHeaders(HttpServletResponse resp, Long projectId, Long interfaceId,
+                                       Long ruleId, boolean matched, String mode, int costMs) {
+        String code = engine.projectCodeOf(projectId);
+        if (code != null) {
+            resp.setHeader("X-Mirage-Project", code);
+        }
+        if (interfaceId != null) {
+            resp.setHeader("X-Mirage-Interface", String.valueOf(interfaceId));
+        }
+        if (ruleId != null) {
+            resp.setHeader("X-Mirage-Rule", String.valueOf(ruleId));
+        }
+        resp.setHeader("X-Mirage-Matched", matched ? "1" : "0");
+        if (mode != null) {
+            resp.setHeader("X-Mirage-Mode", mode);
+        }
+        resp.setHeader("X-Mirage-Cost-Ms", String.valueOf(costMs));
+    }
 
     /**
      * TIMEOUT 故障注入：改用 servlet 异步，延迟期间不占用容器线程
@@ -324,6 +415,7 @@ public class MockHttpFilter implements Filter {
                 .path(normalizePath(req.getRequestURI(), props.isTrailingSlashTolerant()))
                 .headers(headers)
                 .query(query)
+                .queryRaw(req.getQueryString())
                 .form(form)
                 .bodyRaw(bodyRaw)
                 .body(body)
@@ -459,6 +551,17 @@ public class MockHttpFilter implements Filter {
     }
 
     private byte[] readBody(HttpServletRequest req) throws IOException {
+        long max = props.getMaxBodyBytes();
+        String cl = req.getHeader("Content-Length");
+        if (cl != null) {
+            try {
+                if (Long.parseLong(cl.trim()) > max) {
+                    throw new BodyTooLargeException();
+                }
+            } catch (NumberFormatException ignore) {
+                // 非法 Content-Length 忽略，按实际读取大小判定
+            }
+        }
         InputStream is = req.getInputStream();
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         byte[] buf = new byte[4096];
@@ -474,6 +577,7 @@ public class MockHttpFilter implements Filter {
         return bos.toByteArray();
     }
 
+    /** Mock 请求体超限标记（上限见 mirage.http.max-body-bytes，默认 1MB） */
     private static final class BodyTooLargeException extends RuntimeException {
     }
 

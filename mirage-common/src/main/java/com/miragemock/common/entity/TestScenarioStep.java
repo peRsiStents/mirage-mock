@@ -28,5 +28,18 @@ public class TestScenarioStep extends BaseEntity {
     /** 失败仍继续 */
     private Integer continueOnFail;
 
+    /**
+     * 执行条件（引用上一步结果）：空/always=恒真；passed=上一步通过才执行；
+     * failed=上一步未通过才执行；status==200 / status!=200=按上一步 HTTP 状态。
+     * 首个步骤忽略（视为恒真）。
+     */
+    private String condition;
+
+    /** 失败自动重试次数（普通单次执行步骤生效；数据驱动步骤忽略） */
+    private Integer retryCount;
+
+    /** 重试间隔毫秒 */
+    private Integer retryDelayMs;
+
     private Integer enabled;
 }

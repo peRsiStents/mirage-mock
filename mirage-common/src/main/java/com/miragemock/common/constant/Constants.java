@@ -30,4 +30,11 @@ public final class Constants {
 
     /** 规则版本初始值 */
     public static final int INITIAL_RULE_VERSION = 1;
+
+    /** 接口录制回放模式：关闭 */
+    public static final int RECORD_MODE_OFF = 0;
+    /** 接口录制回放模式：录制（未命中规则时转发上游并存快照） */
+    public static final int RECORD_MODE_RECORD = 1;
+    /** 接口录制回放模式：回放（优先返回录制快照） */
+    public static final int RECORD_MODE_REPLAY = 2;
 }

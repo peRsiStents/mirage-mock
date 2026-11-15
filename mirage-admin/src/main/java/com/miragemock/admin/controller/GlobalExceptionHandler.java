@@ -57,6 +57,12 @@ public class GlobalExceptionHandler {
         return Result.fail(ResultCode.BAD_REQUEST, "数据不满足约束条件，请检查输入");
     }
 
+    /** 表达式求值错误：用户写的 DSL/断言表达式问题，不是服务端故障 */
+    @ExceptionHandler(com.miragemock.dsl.eval.ExprException.class)
+    public Result<Void> expr(com.miragemock.dsl.eval.ExprException e) {
+        return Result.fail(ResultCode.EXPRESSION_ERROR, e.getMessage());
+    }
+
     @ExceptionHandler(Throwable.class)
     public ResponseEntity<Result<Void>> other(Throwable e) {
         log.error("未处理异常", e);

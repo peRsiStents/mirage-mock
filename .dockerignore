@@ -1,0 +1,22 @@
+# Maven / Java
+target/
+*.jar
+*.war
+.mvn/
+
+# 前端
+mirage-ui/node_modules/
+mirage-ui/dist/
+
+# Git / IDE / OS
+.git/
+.gitignore
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# 日志与本地配置
+*.log
+logs/
+deploy/mirage-mock.env

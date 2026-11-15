@@ -3,6 +3,7 @@ package com.miragemock.admin.config;
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import com.miragemock.admin.alert.AlertProperties;
 import com.miragemock.admin.security.JwtAuthFilter;
 import com.miragemock.admin.security.JwtUtil;
 import com.miragemock.admin.security.SecurityProperties;
@@ -27,7 +28,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 管理端装配：安全属性 + 密码编码器 + JWT 鉴权过滤器注册。
  */
 @Configuration
-@EnableConfigurationProperties({ SecurityProperties.class, TestTargetProperties.class, BatchProperties.class })
+@EnableConfigurationProperties({ SecurityProperties.class, TestTargetProperties.class,
+        BatchProperties.class, AlertProperties.class })
 public class AdminConfig {
 
     @Bean

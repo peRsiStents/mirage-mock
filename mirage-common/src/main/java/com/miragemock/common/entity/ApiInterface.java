@@ -34,5 +34,13 @@ public class ApiInterface extends BaseEntity {
     /** 1 启用 / 0 停用 */
     private Integer status;
 
+    /**
+     * 录制回放模式（HTTP 专用）：0=关闭 1=录制（未命中规则时转发上游并存快照） 2=回放（优先返回录制快照）
+     */
+    private Integer recordMode;
+
+    /** 录制回放上游地址（如 http://real-service:8080），未命中规则且非关闭模式时转发 */
+    private String upstreamUrl;
+
     private String remark;
 }

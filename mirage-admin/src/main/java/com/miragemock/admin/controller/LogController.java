@@ -4,6 +4,7 @@ import com.miragemock.admin.service.LogService;
 import com.miragemock.common.api.PageResult;
 import com.miragemock.common.api.Result;
 import com.miragemock.common.entity.MockRequestLog;
+import com.miragemock.common.entity.MockRule;
 import com.miragemock.common.entity.TestCase;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,5 +49,11 @@ public class LogController {
     @PostMapping("/{logId}/testcase")
     public Result<TestCase> toTestCase(@PathVariable Long pid, @PathVariable Long logId) {
         return Result.ok(logService.buildTestCaseDraft(pid, logId));
+    }
+
+    /** 将一条请求日志解析为「未保存」的 Mock 规则草稿（响应模板启发式 DSL 化，复核后保存）。 */
+    @PostMapping("/{logId}/rule")
+    public Result<MockRule> toRuleDraft(@PathVariable Long pid, @PathVariable Long logId) {
+        return Result.ok(logService.buildRuleDraft(pid, logId));
     }
 }

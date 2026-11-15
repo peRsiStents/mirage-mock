@@ -34,6 +34,8 @@ mirage:
     enabled: true
     port: 19080
     timeout-hang-ms: 60000
+    # Mock 请求体上限（字节），防超大 body 打爆内存
+    max-body-bytes: 1048576
   security:
     jwt-secret: ${MIRAGE_JWT_SECRET:mirage-mock-dev-jwt-secret-please-change-in-prod-0123456789}
     jwt-ttl-hours: 12
@@ -51,6 +53,12 @@ mirage:
     concurrency: ${MIRAGE_BATCH_CONCURRENCY:8}
     # 批量执行任务队列容量，队列满时由请求线程自己跑（背压，不丢任务）
     queue-capacity: ${MIRAGE_BATCH_QUEUE_CAPACITY:512}
+  alert:
+    # 定时回归失败告警（默认关闭；type: dingtalk/wecom/generic）
+    enabled: ${MIRAGE_ALERT_ENABLED:false}
+    webhook-url: ${MIRAGE_ALERT_WEBHOOK:}
+    type: ${MIRAGE_ALERT_TYPE:generic}
+    keyword: ${MIRAGE_ALERT_KEYWORD:}
 
 logging:
   level:

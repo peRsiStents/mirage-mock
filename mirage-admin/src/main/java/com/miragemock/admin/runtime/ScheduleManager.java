@@ -32,14 +32,17 @@ public class ScheduleManager {
     private final TestScheduleMapper scheduleMapper;
     private final ScenarioService scenarioService;
     private final ThreadPoolTaskScheduler taskScheduler;
+    private final com.miragemock.admin.alert.AlertService alertService;
     private final Map<Long, ScheduledFuture<?>> tasks = new ConcurrentHashMap<>();
 
     @Autowired
     public ScheduleManager(TestScheduleMapper scheduleMapper, ScenarioService scenarioService,
-                           ThreadPoolTaskScheduler taskScheduler) {
+                           ThreadPoolTaskScheduler taskScheduler,
+                           com.miragemock.admin.alert.AlertService alertService) {
         this.scheduleMapper = scheduleMapper;
         this.scenarioService = scenarioService;
         this.taskScheduler = taskScheduler;
+        this.alertService = alertService;
     }
 
     /** 应用就绪后加载所有 enabled 调度 */
@@ -90,6 +93,11 @@ public class ScheduleManager {
             s.setLastCostMs(result.getCostMs());
             scheduleMapper.updateById(s);
             log.info("定时任务 {} 执行完成: scenario={}, passed={}", scheduleId, s.getScenarioId(), result.getPassed());
+            if (!result.getPassed()) {
+                alertService.send("Mirage Mock 定时回归失败",
+                        "调度 #" + scheduleId + " 场景 #" + s.getScenarioId() + " 执行未通过"
+                                + "（耗时 " + (result.getCostMs() == null ? "-" : result.getCostMs() + "ms") + "）");
+            }
             return result;
         } catch (BizException e) {
             // 业务异常（如环境跨项目、场景不存在）保留原类型抛出，
@@ -104,6 +112,8 @@ public class ScheduleManager {
             s.setLastRunTime(LocalDateTime.now());
             s.setLastPassed(0);
             scheduleMapper.updateById(s);
+            alertService.send("Mirage Mock 定时回归异常",
+                    "调度 #" + scheduleId + " 场景 #" + s.getScenarioId() + " 执行异常: " + e.getMessage());
             throw new RuntimeException(e);
         }
     }
